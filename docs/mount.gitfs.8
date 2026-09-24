@@ -1,4 +1,4 @@
-.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q14)
+.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q15)
 .TH MOUNT.GITFS 8 "2026-09-24" "gitfs 0.1.0" "System Administration"
 .SH NAME
 mount.gitfs \- mount a git repository as a read\-only FUSE filesystem
@@ -189,6 +189,14 @@ are accepted as redundant no\-ops; their reverse counterparts
 .BR suid ,
 .B dev )
 are usage errors, so the baseline cannot be diluted.
+.BI fsname= name
+may override the baseline fsname (cosmetic only);
+.BI subtype= x
+is baseline\-protected and overriding it is a usage error, since the
+.I /proc/mounts
+type field and
+.B "mount \-t gitfs"
+matching depend on it.
 All other keys are forwarded verbatim to the libfuse option parser
 (e.g.\&
 .BR kernel_cache ;
@@ -265,13 +273,22 @@ and
 of tree content are all the committer time of the underlying commit
 (constant within a snapshot; atime never advances on read).
 .I commits
-carries its generation time,
+carries its generation time
+.RB ( mount
+time until first generated, while
+.B stat
+still reports size 0; after a fingerprint rebuild, stat reports the
+current cached version's time),
 .I .gitfs.json
 the mount time.
 .PP
 .B st_ino
-is a 64\-bit hash of the full path (stable across remounts; equal
-inodes never imply hard links or shared content).
+is a 64\-bit hash of the full path.
+Hash collisions are resolved by a mount\-local registry, so two
+different paths never share an inode; remount stability holds except
+for the astronomically rare colliding paths (~3e\-8 per million
+entries).
+Equal inodes never imply hard links or shared content.
 .SS Submodules
 Rendered as an empty directory plus a sibling text file
 .IR <name>\.gitfs\-submodule

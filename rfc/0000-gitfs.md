@@ -2,7 +2,7 @@
 
 - RFC 编号: 0000
 - 标题: gitfs — read-only git-to-FUSE 文件系统
-- 状态: Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4）
+- 状态: Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5）
 - 日期: 2026-09-24
 - 目标版本: 0.1.0
 
@@ -167,12 +167,25 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   `commits`、`.gitfs.json` 等合成入口同口径，根固定为 FUSE_ROOT_ID=1），
   跨重挂载确定，`tar`/`find -inum`/`diff` 等工具得到可复现的 inode。
   **刻意不做 oid 派生**——同一 blob 出现在多个 ref 路径下若共享 inode，
-  会被 `tar -c`/`rsync -H` 误判为硬链接；路径派生保证不同路径必得不同
-  inode，且 inode 相等**不**承诺内容同一（本文件系统无硬链接语义）。
+  会被 `tar -c`/`rsync -H` 误判为硬链接；路径派生 + 碰撞消歧（见下）
+  保证不同路径必得不同 inode，且 inode 相等**不**承诺内容同一（本
+  文件系统无硬链接语义）。
+  **哈希碰撞消歧（Q15c）**：哈希函数可注入（单测可强制构造碰撞）；
+  挂载期维护 `primary_hash → 首个占用路径` 注册表，受 3.4 单互斥保护；
+  后到路径命中已占用哈希时，依次取 `H(path || '#' || k)`（k=1,2,…）
+  中最小的未占用值。备选值本身由路径确定，但占用归属取决于遭遇顺序
+  ——跨重挂载可复现性**在冲突路径上除外**（10⁶ 条目生日碰撞概率
+  ≈ 3×10⁻⁸，实际不可达；注册表是正确性兜底而非预期路径）。
   挂载基线因此增补 `use_ino`（见 3.7），由 gitfs 填充该派生值。
 - `st_uid`/`st_gid`：挂载进程的 uid/gid（fuse 默认行为）。
-- 合成文件的 `st_mtime`：`commits` 为其生成时刻；`.gitfs-submodule` 为所属
-  commit 的 committer time（内容确定性派生自树，避免逐次 stat 漂移）；
+- 合成文件的 `st_mtime`：`commits` 为其生成时刻——**生成前**（§3.3 的
+  `st_size=0` 窗口期）为**挂载时刻**（Q15b，与 `.gitfs.json` 同口径：
+  占位符属于这次挂载、内容属于那次生成；不逐次取当前时钟，避免逐次
+  stat 漂移），首次 open 后跳变为真实生成时刻（与 size 0→真实值同构）；
+  refs 指纹变化触发重建后，stat 报**当前缓存版本**的生成时刻——正在
+  钉住旧版本读的句柄可能看到比自己快照更新的 mtime，与 3.5"下一次
+  open 起可见新版本"口径一致。`.gitfs-submodule` 为所属 commit 的
+  committer time（内容确定性派生自树，避免逐次 stat 漂移）；
   `.gitfs.json` 为挂载时刻（快照语义，见 3.6）。
 - `.gitfs-submodule` 说明文件：mode `0644`，内容为两行 `key=value` 文本——
   `url=<submodule url>` 与 `commit=<完整 oid>`（各以 LF 结尾）；url 取自该
@@ -338,7 +351,10 @@ mount(8) 按助手约定转交 `-n/-s/-v/-r/-w` 标志与 `-o` 选项串；fstab
                        同义的键（ro/nosuid/nodev/default_permissions/
                        use_ino）
                        接受为冗余无操作，反向键（rw/suid/dev）报错退出
-                       1，防安全基线被 CLI 稀释或顶掉（Q10/Q13/Q14）；其余
+                       1，防安全基线被 CLI 稀释或顶掉（Q10/Q13/Q14）；
+                       `fsname=` 允许透传覆盖基线（cosmetic），
+                       `subtype=` 覆盖基线 → 参数错误退出 1（基线保护，
+                       Q15a）；其余
                        键原样透传 libfuse 选项解析器（如 kernel_cache；
                        allow_other 需 /etc/fuse.conf 启用
                        user_allow_other），未知键由 libfuse 拒绝 → 退出 1
@@ -360,7 +376,11 @@ mount(8) 按助手约定转交 `-n/-s/-v/-r/-w` 标志与 `-o` 选项串；fstab
 
 - 挂载选项硬编码基线：`ro,fsname=gitfs,default_permissions,subtype=gitfs,
   nosuid,nodev,use_ino`（`use_ino` 令内核采用 gitfs 填充的路径派生
-  `st_ino`，见 3.2）。
+  `st_ino`，见 3.2）。透传键与基线的冲突序（Q15a）：`fsname=` 可被
+  用户 `-o` 覆盖（cosmetic，仅影响展示名）；`subtype=` 与 ro/nosuid/
+  nodev/default_permissions/use_ino 同列受基线保护——覆盖即参数错误
+  退出 1，`/proc/mounts` 的 type 字段与 `mount -t gitfs`/`findmnt
+  -t gitfs` 的匹配依赖它。
 - 卸载：`umount <mountpoint>`（或 `fusermount3 -u`）；守护进程收到
   `SIGINT`/`SIGTERM` 亦优雅退出（见 3.4）。
 - 退出码：0 正常卸载；1 参数错误；2 仓库不可读/不是 git 仓库；3 挂载失败。
@@ -424,7 +444,8 @@ gitfs/
 - **版本**：SemVer；打 tag 出 release，CI 产出各发行版二进制 + SBOM。
 - **测试策略**：
   - 单测：Catch2 v3；覆盖 path_map 状态机（含畸形路径、Unicode、超长 oid）、
-    LRU 逐出、错误映射表；
+    LRU 逐出、错误映射表、st_ino 注册表碰撞消歧（哈希函数可注入，
+    强制构造碰撞，见 3.2/Q15c）；
   - 集成：脚本生成 fixture 仓库 → 挂载到 tmpdir → 断言内容与
     `git --no-replace-objects ls-tree`/`git cat-file` 结果一致（oracle
     与 gitfs 同为"replace 不生效"语义，见 3.1；fixture 含 replace ref
@@ -538,3 +559,20 @@ gitfs/
   `attr_timeout`/`entry_timeout`（见 3.5）。
 - （记账）round 3 仅为 §4 ASCII 目录树第 349 行对齐微修（提交
   8e0e57d），无决议内容，补记于此。
+
+### 7.5 收尾决策（2026-09-24，定稿 review round 2 跟进）
+
+- **Q15 透传键覆盖序、commits 生成前 mtime、st_ino 碰撞消歧（已决）**：
+  (a) `-o` 透传键与硬编码基线的冲突序——`fsname=` 允许覆盖（cosmetic）；
+  `subtype=` 入基线保护名单，覆盖 → 参数错误退出 1（`/proc/mounts`
+  的 type 与 `mount -t gitfs`/`findmnt -t gitfs` 匹配依赖；与
+  ro/nosuid/nodev/default_permissions/use_ino 保护同口径）（见 3.7）；
+  (b) `commits` 未生成窗口（`st_size=0` 阶段）的 `st_mtime` 为**挂载
+  时刻**（与 `.gitfs.json` 同口径，不逐次取当前时钟），首次 open 后
+  跳变为生成时刻；指纹重建后 stat 报当前缓存版本的生成时刻，钉住
+  旧版本的句柄可见更新的 mtime（见 3.2）；(c) `st_ino` 哈希碰撞由
+  挂载期注册表消歧：`primary_hash → 首个占用路径`，冲突时后到路径
+  取 `H(path || '#' || k)` 最小未占用值（k=1,2,…），保证不同路径
+  必得不同 inode；跨重挂载可复现性在冲突路径上除外（10⁶ 条目生日
+  碰撞概率 ≈ 3×10⁻⁸），哈希函数可注入、单测强制碰撞断言消歧
+  （见 3.2、§4）。
