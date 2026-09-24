@@ -487,19 +487,26 @@ libmount 层裁决为单个到达键、到达后均为无操作（`rw` 记警告
 **`-o` 串中 VFS 键的实际到达口径（Q22a，勘误 Q21 版正文的断言——
 "通用 VFS 键由 mount(8) 翻译为挂载 syscall 标志、不会到达 gitfs"
 系事实错误；Q23a 补全实测名单并钉分类规则与键名匹配；Q24a 再补
-symfollow/nosymfollow/nouser 并修分诊规则锚点）**：libmount
+symfollow/nosymfollow/nouser 并修分诊规则锚点；Q25a 勘误
+acl/quiet/showexec/bsdgroups 的表内归属并限定表轨）**：libmount
 仅滤除固定子集（auto/noauto/comment=/x-*/loop/offset=/sizelimit=/
 defaults 及传播键），其余 VFS 键原样到达——atime/noatime/relatime/
 strictatime/lazytime/diratime/nodiratime、sync/async/dirsync、
 exec/noexec、user/users/owner/group/nouser、symfollow/nosymfollow、
 iversion/silent/loud/mand/nomand/nofs、_netdev、nofail、remount、
 uid=/gid=/umask=、context=/fscontext=/defcontext=/rootcontext=
-（SELinux 标签键，值含冒号、实测整值到达）均在列（acl/quiet/
-showexec/bsdgroups 等其余表内无操作键复测亦原样到达，由下述
-分诊规则表轨兜底，不逐一枚举）。到达的无关 VFS 键按 `rw`/ntfs-3g
+（SELinux 标签键，值含冒号、实测整值到达）、acl/quiet/showexec/
+bsdgroups 均在列——后四键**不在** man mount(8)
+"Filesystem-independent mount options" 表内（实测 2.42.3：quiet/
+showexec 属 FILESYSTEM-SPECIFIC 节的 FAT 选项、acl 属 ext/ntfs/
+overlay 等 fs-specific 节、bsdgroups 全 man 页零出现），其到达
+系 libmount 将表外未知键当 fs-specific 数据转发所致，故收入
+枚举名单而非表轨（Q25a 勘误 Q24a 的"表内无操作键、表轨兜底"
+断言）。到达的无关 VFS 键按 `rw`/ntfs-3g
 先例**接受并忽略**（verbose 记一条）：atime 族/sync 族/exec 族/
 user 族（含 nouser）/symfollow/nosymfollow/iversion/silent/loud/
-mand/nomand/nofs/_netdev/nofail——
+mand/nomand/nofs/_netdev/nofail/acl/quiet/showexec/bsdgroups
+（后四键为表外转发键，Q25a）——
 ro、atime≡mtime 语义下均无害，`mount -t gitfs -o
 noatime,nodiratime repo dir` 这类常见习惯、fstab 的 `user`
 （非 root 挂载）与 boot 常见的 `nofail`/`_netdev` 均不因未知键
@@ -514,24 +521,40 @@ noatime,nodiratime repo dir` 这类常见习惯、fstab 的 `user`
 却不在 util-linux 2.42.3 man 表内，按表外条款会误落 libfuse 拒
 绝；演进键 `symfollow`（2.41+ 新增、实测原样到达、对 gitfs 为
 无操作）不在表内亦不在枚举内，其逆键 `nosymfollow`（表内）却
-被接受）**：(1) 名单匹配按**截首个 `=` 取键名**钉住——
+被接受；Q25a 再勘误 Q24a——`acl`/`quiet`/`showexec`/`bsdgroups`
+四键实测到达但均不在 man 表内，原"表内无操作键由表轨兜底"的
+归位错误，四键改入枚举轨、表轨限定仅认该表所列键）**：
+(1) 名单匹配按**截首个 `=` 取键名**钉住——
 `user=alice`、`nofail=1` 实测带值到达，按键名归入相应分诊、
 值不再校验（`context=` 族值含冒号，逗号切分不受影响、仅不得
-再按冒号拆分值）；(2) **枚举轨优先**——上列实测枚举名单所列
-键（含表外的 `nofs`/`symfollow`）一律按名单分诊为接受并忽略、
-verbose 记一条；(3) **表轨兜底**——凡 mount(8) 通用 VFS 选项
-表（man mount(8) "Filesystem-independent mount options" 一节）
-所列、且对 gitfs 为无操作的键（ro 基线、atime≡mtime、无属主
-映射语义下无效果；含枚举未逐一收录的 `acl`/`quiet`/`showexec`/
-`bsdgroups` 等表内无操作键）→ 接受并忽略、verbose 记一条；
+再按冒号拆分值）；该规则同样吸收 util-linux 2.41+ 的 ro/rw 带
+限定值形态（`ro=vfs`/`rw=fs` 及 recursive 参数形态）——截 `=`
+后键名即 ro/rw，落入既有无操作路径（ro 冗余、rw 记警告），
+无须特殊解析（Q25d）；(2) **枚举轨优先**——上列实测枚举名单所列
+键（含表外的 `nofs`/`symfollow` 与 `acl`/`quiet`/`showexec`/
+`bsdgroups`）一律按名单分诊为接受并忽略、verbose 记一条；
+(3) **表轨兜底**——仅认 man mount(8)
+"Filesystem-independent mount options" 一节**所列**的键：
+所列且对 gitfs 为无操作者（ro 基线、atime≡mtime、无属主映射
+语义下无效果；表内否定键 `noiversion`/`norelatime`/
+`nostrictatime`/`nolazytime` 与带值形态（`noexec=recursive`
+等）正是由本轨经截=取键名吸收——枚举名单未逐一收录它们，
+在此点破防再犯）→ 接受并忽略、verbose 记一条；
 该表中对 gitfs 有语义或安全影响者（suid/dev、remount、uid=/
 gid=/umask=、context= 族）→ 专用错误退出 1；(4) 两轨皆不属的
-键透传 libfuse（未知 → 退出 1）。枚举名单是 util-linux 2.42.3
+键透传 libfuse（未知 → 退出 1）——直连调用收到 mount(8) 路径
+上被滤除的键（`defaults`/`auto`/`noauto`/`comment=`/`x-*`/
+`loop`/`offset=`/`sizelimit=`/传播键）时即落此条、退出 1：这些
+是 mount(8) 侧指令（fstab 自动化/回环设备/传播设置），直连
+路径无消费者，**显式声明该不对称**为设计意图——mount(8) 路径
+滤除后恒成功，直连路径报错以暴露无效意图（Q25c）。
+枚举名单是 util-linux 2.42.3
 的实测快照，对表内键不宣称穷尽（表轨兜底）；**演进条款**：
 未来 util-linux 版本使新的表外键到达 `-o` 串时（如 2.41+ 的
 `symfollow`），按"是否对 gitfs 无操作"人工分诊入枚举名单，并
-写入维护核对单（新 util-linux 发布 → diff man 表与 libmount
-转发键集 → 分诊 → 更新枚举名单与 §4 用例），而非因枚举缺漏
+写入维护核对单 `docs/maintenance-checklist.md`（§4，新
+util-linux 发布 → diff man 表与 libmount 转发键集 → 分诊 →
+更新枚举名单与 §4 用例），而非因枚举缺漏
 落入 libfuse 拒绝（连续四轮 review 均发现枚举或锚点漏键，故钉
 双轨锚点 + 演进条款防再漏）。
 
@@ -567,16 +590,24 @@ owner/group 不得写 noexec 存在性断言。直连调用时出现在 `-o`
                        owner/group 仅 nosuid,nodev、user=<name> 无
                        附带，Q23d）、symfollow/nosymfollow、
                        iversion/silent/loud/mand/nomand/nofs、
-                       _netdev、nofail，Q22a/Q23a/Q24a）一律接受并
+                       _netdev、nofail、acl/quiet/showexec/
+                       bsdgroups（表外转发键，Q25a），
+                       Q22a/Q23a/Q24a/Q25a）一律接受并
                        忽略、verbose 记一条——名单匹配按截首个 = 取
                        键名钉住（user=alice、nofail=1 按键名归入，
-                       Q23a），分诊为双轨锚点（Q24a）：枚举名单
-                       优先，mount(8) 通用 VFS 选项表中其余对
-                       gitfs 无操作的键（acl/quiet/showexec/
-                       bsdgroups 等）兜底接受忽略，表外新键（如
+                       且 2.41+ 的 ro=vfs/rw=fs 带值形态截=后即
+                       ro/rw、落入既有无操作路径，Q25d），分诊为
+                       双轨锚点（Q24a，Q25a 勘误）：枚举名单
+                       优先，mount(8) 通用 VFS 选项表所列键中其余
+                       对 gitfs 无操作者（如 noiversion/norelatime/
+                       nostrictatime/nolazytime 等表内否定键）兜底
+                       接受忽略、表轨仅认该表所列键，表外新键（如
                        util-linux 2.41+ 的 symfollow）人工分诊入
                        枚举名单、未分诊的表外键透传 libfuse，防
-                       util-linux 演进再漏键；ro、atime≡mtime 语义下忽略无
+                       util-linux 演进再漏键；直连调用收到
+                       defaults/auto/noauto 等 mount(8) 侧滤除键
+                       报错退出 1（显式不对称，Q25c）；ro、
+                       atime≡mtime 语义下忽略无
                        害（`-o noatime,nodiratime` 习惯用法与 fstab
                        `user`/`nofail`/`_netdev` 场景不因未知键
                        失败）；反向键 suid/dev 报错退出 1，
@@ -707,6 +738,12 @@ gitfs/
     │                          # 必含"gc/prune 并发""空仓库""readdir 字节
     │                          # 字典序"三节，见 3.1、3.2；含 st_ino 注册
     │                          # 表内存上界声明）
+    ├── maintenance-checklist.md  # 维护核对单：3.7 演进条款的载体（新
+    │                          # util-linux 发布 → diff mount(8) man
+    │                          # "Filesystem-independent mount options"
+    │                          # 表与 libmount 转发键集 → 按"是否对
+    │                          # gitfs 无操作"分诊 → 更新枚举名单与
+    │                          # §4 用例，见 3.7/§7.14(a)、Q25b）
     └── mount.gitfs.8            # man 手册（roff；CMake install 到 $(mandir)/man8）
 ```
 
@@ -833,7 +870,8 @@ gitfs/
   无操作并记 stderr 警告——libmount 对助手调用无条件预置该键；现行
   拒绝名单为 `suid/dev`；到达 `-o` 串的无关 VFS 键（noatime 族等）
   经 §7.12(a)/Q22、§7.13(a)/Q23（补全名单并钉分诊规则）、
-  §7.14(a)/Q24（再补名单并改双轨锚点）定为接受并忽略、
+  §7.14(a)/Q24（再补名单并改双轨锚点）、§7.15(a)/Q25（四键改入
+  枚举轨、表轨限定仅认表内所列）定为接受并忽略、
   remount/uid=/context= 等无对应语义的键退出 1）。
 - **Q11 libgit2 缓存调参与防双层缓存（已决）**：tree/commit 依赖
   libgit2 内置缓存，但显式抬 per-type 上限（tree 1MiB——默认 4KiB 会
@@ -1093,7 +1131,9 @@ gitfs/
   §7.13(a)(d)/Q23 补全与精化：补 atime/nodiratime/iversion/
   silent/loud/mand/nomand/nofs 及 context= 族，并钉"截首个 =
   取键名"与规则优先的分诊；复经 §7.14(a)/Q24 补 symfollow/
-  nosymfollow/nouser 入名单、锚点改"枚举优先 + 表轨兜底"双轨），
+  nosymfollow/nouser 入名单、锚点改"枚举优先 + 表轨兜底"双轨；
+  再经 §7.15(a)/Q25 勘误 acl/quiet/showexec/bsdgroups 实为表外
+  转发键、改入枚举轨并限定表轨仅认表内所列），
   按原口径全部命中"未知键 → libfuse
   拒绝 → exit 1"——`mount -t gitfs -o noatime repo dir`（常见
   习惯）必失败，fstab 含 `user`（非 root 挂载）或 `nofail`/
@@ -1147,7 +1187,7 @@ gitfs/
   `user=alice` 键值形态两用例，另以直连调用断言 remount/uid=/
   context= 的专用错误；名单与"表内/表外"单轨锚点复经
   §7.14(a)/Q24 勘误——补 symfollow/nosymfollow/nouser 入名单、
-  锚点改双轨并加演进条款）；
+  锚点改双轨并加演进条款；§7.15(a)/Q25 再勘误四键表内归属）；
   (b) **-s 不实现 sloppy 放宽（小）**：mount(8) 文档语义为"忽略
   文件系统不支持的挂载选项"，但静默吞掉拼写错误的自有键会掩盖
   配置错误；显式文档化 `-s` 仅标志本身被容忍、不放松未知 `-o`
@@ -1180,7 +1220,9 @@ gitfs/
   实测快照却漏收实测到达且表内的 `nouser`/`nosymfollow`。修订：
   `symfollow`/`nosymfollow`/`nouser` 补入忽略名单（`acl`/
   `quiet`/`showexec`/`bsdgroups` 等其余实测到达的表内无操作键由
-  表轨兜底、不逐一枚举）；分诊规则锚点改为**"枚举名单优先 +
+  表轨兜底、不逐一枚举——该括注的"表内"归属经 §7.15(a)/Q25
+  勘误：四键实测均不在 2.42.3 man 表内，改入枚举轨）；分诊规则
+  锚点改为**"枚举名单优先 +
   表内无操作键兜底"双轨**（枚举轨覆盖表外键 nofs/symfollow，
   表轨覆盖未枚举的表内键），并为表外新到达键加**演进条款**：
   新 util-linux 版本发布时按"是否对 gitfs 无操作"人工分诊入
@@ -1200,3 +1242,44 @@ gitfs/
   键、到达后均为无操作（`rw` 记警告），挂载恒为 ro（直连调用
   纵然出现 rw,ro 同串，两键亦各自为无操作）；§3.7 与 man 页
   INVOCATION 各以一段钉住。
+
+### 7.15 表轨锚点限定、维护核对单落点、直连滤除键口径与带值 ro/rw 注记（2026-09-24，定稿后 review round 5 跟进）
+
+- **Q25 四键表内归属勘误、演进条款载体、直连不对称声明与带值
+  ro/rw 形态注记（已决）**：round 5 以本机 util-linux 2.42.3 man
+  页复核 Q24 前提（symfollow/nofs 确不在 FILESYSTEM-INDEPENDENT
+  表、nouser/nosymfollow 在表内均属实）并修订四项：
+  (a) **四键改入枚举轨、表轨限定表内键（中）**：`acl`/`quiet`/
+  `showexec`/`bsdgroups` 被 Q24a 误标为"表内无操作键、由表轨兜
+  底"——实测 2.42.3 man 的 FILESYSTEM-INDEPENDENT 表对四键零匹
+  配（quiet/showexec 属 FILESYSTEM-SPECIFIC 节的 FAT 选项、acl
+  属 ext/ntfs/overlay 等 fs-specific 节、bsdgroups 全 man 页零
+  出现），它们实测到达是因为 libmount 把表外未知键当 fs-specific
+  数据转发，而非在表内；按双轨规则(4)（两轨皆不属 → 透传
+  libfuse → 退出 1）四键会被拒，与 §3.7 到达段括注、§3.7 帮助
+  文本、§7.14(a)、man 页 INVOCATION/OPTIONS 五处"表轨兜底接受
+  忽略"的断言直接自相矛盾——恰是 Q24a 要消除的锚点失配类问题、
+  由 Q24 自己引入。修订：四键改入枚举轨（实测到达且对 gitfs 无
+  操作），表轨措辞限定"仅认 Filesystem-independent 表所列"，
+  五处同步修订；顺带点破表内否定键 noiversion/norelatime/
+  nostrictatime/nolazytime 正是表轨覆盖的表内键（现规则恰好覆
+  盖但未点破，防再犯）；Q10/§7.12(a)/§7.13(a)/§7.14(a) 勘误链
+  同步补注；
+  (b) **维护核对单落点（小）**：§7.14(a) 演进条款引用的"维护核
+  对单"在 §4 工程树原无落点（docs/ 仅 filesystem-semantics.md
+  与 mount.gitfs.8）——增 `docs/maintenance-checklist.md` 节点，
+  作为"diff man 表与转发键集 → 分诊 → 更新枚举名单与用例"流
+  程的载体（§4 树与 §3.7 演进条款同步指向）；
+  (c) **直连调用滤除键口径（小）**：直连 `mount.gitfs … -o
+  defaults` 等在 mount(8) 路径上被滤除的键（defaults/auto/
+  noauto/comment=/x-*/loop/offset=/sizelimit=/传播键）原无口
+  径——按规则(4) 落"两轨皆不属 → 透传 libfuse → 退出 1"，与
+  mount(8) 路径（滤除、恒成功）不对称且未声明；显式钉住该不对
+  称为设计意图（这些是 mount(8) 侧指令，直连路径无消费者，报
+  错以暴露无效意图），§3.7 规则(4) 与帮助文本、man 页 OPTIONS
+  各一句；
+  (d) **带值 ro/rw 形态注记（微）**：util-linux 2.41+ 的
+  `ro=vfs`/`rw=fs`（及 recursive 参数形态）已被"截首个 = 取键
+  名"规则覆盖（截=后键名即 ro/rw，落入既有无操作路径：ro 冗余、
+  rw 记警告），原未注记——§3.7 规则(1) 与帮助文本、man 页
+  OPTIONS 各一句点破，实现者无须为带值形态写特殊解析。

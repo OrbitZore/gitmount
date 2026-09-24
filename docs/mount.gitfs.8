@@ -1,4 +1,4 @@
-.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q24)
+.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q25)
 .TH MOUNT.GITFS 8 "2026-09-24" "gitfs 0.1.0" "System Administration"
 .SH NAME
 mount.gitfs \- mount a git repository as a read\-only FUSE filesystem
@@ -134,11 +134,13 @@ nodev, while owner and group only add nosuid, nodev), symfollow and
 nosymfollow, iversion, silent,
 loud, mand, nomand, nofs, _netdev, nofail, remount, uid=/gid=/umask=,
 and the SELinux label keys context=/fscontext=/defcontext=/rootcontext=
-(values contain colons; other in\-table no\-op keys such as acl, quiet,
-showexec, and bsdgroups are likewise forwarded verbatim and are covered
-by the table track described under
-.BR OPTIONS )
-\(em and is
+(values contain colons), plus acl, quiet, showexec, and bsdgroups
+(these four are not in the filesystem\-independent options table \(em
+quiet and showexec are FAT options listed under FILESYSTEM\-SPECIFIC
+mount options, acl appears only in fs\-specific sections, and
+bsdgroups appears nowhere in the mount(8) manual; they arrive because
+libmount forwards unknown out\-of\-table keys as fs\-specific data)
+\(em and every arriving option is
 classified as described under
 .BR OPTIONS .
 With util\-linux >= 2.35 a command\-line
@@ -307,7 +309,8 @@ strictatime, lazytime, diratime, nodiratime), the sync family (sync,
 async, dirsync), the exec family (exec, noexec), the user family
 (user, users, owner, group, nouser), symfollow and nosymfollow,
 iversion, silent, loud, mand, nomand,
-nofs, _netdev, and nofail \(em all harmless under
+nofs, _netdev, nofail, and the out\-of\-table forwarded keys acl,
+quiet, showexec, and bsdgroups \(em all harmless under
 the hardcoded
 .B ro
 and the atime≡mtime semantics, so common habits such as
@@ -323,23 +326,42 @@ valued spellings such as
 .BI user= alice
 or
 .BI nofail= 1
-are matched by key name alone (the value is not inspected).
+are matched by key name alone (the value is not inspected); the
+util\-linux >= 2.41 qualified forms
+.BI ro= vfs
+and
+.BI rw= fs
+(and recursive spellings) therefore match ro/rw and land on the
+existing no\-op paths (ro is redundant, rw is warned) with no
+special parsing of their own.
 The classification is dual\-track, with the enumeration first: any key
 named in the enumerated list above is classified by the list \(em
 including keys absent from mount(8)'s filesystem\-independent options
-table (nofs, and symfollow, added by util\-linux >= 2.41 and still
-absent from the 2.42.3 table). Then any option from that table (see
+table (nofs, symfollow \(em added by util\-linux >= 2.41 and still
+absent from the 2.42.3 table \(em and acl, quiet, showexec, and
+bsdgroups, which arrive only because libmount forwards unknown
+out\-of\-table keys as fs\-specific data). Then the table track covers
+only options listed in that table (see
 the
 .BR mount (8)
-manual, "Filesystem\-independent mount options") that is a no\-op for
-gitfs \(em including in\-table keys not individually enumerated (acl,
-quiet, showexec, bsdgroups, and others) \(em is accepted and ignored;
+manual, "Filesystem\-independent mount options"): a listed option that
+is a no\-op for gitfs \(em including in\-table negation keys not
+individually enumerated, such as noiversion, norelatime, nostrictatime,
+and nolazytime \(em is accepted and ignored;
 table options that would change gitfs semantics or security intent
-are usage errors; keys in neither track are forwarded to libfuse.
+are usage errors; keys in neither track are forwarded to libfuse
+(so a direct invocation with keys mount(8) itself filters \(em defaults,
+auto, noauto, comment=, x\-*, loop, offset=, sizelimit=, and the
+propagation options \(em is a usage error: these are mount(8)\-side
+directives with no consumer on the direct path, an intentional
+asymmetry with the mount(8) path, where they are filtered before the
+helper is exec'd and always succeed).
 When a future util\-linux release forwards a new key that the table
 does not list (as 2.41's symfollow was), it is triaged by hand \(em
 "is it a no\-op for gitfs?" \(em into the enumerated list, tracked in
-the maintenance checklist (on each util\-linux release: diff the man
+the maintenance checklist
+.IR docs/maintenance\-checklist.md
+(on each util\-linux release: diff the man
 table against the set of forwarded keys, triage, update the list and
 the test cases), instead of falling through to libfuse rejection.
 .BR remount ,
