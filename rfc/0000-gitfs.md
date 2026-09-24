@@ -346,7 +346,7 @@ gitfs/
 │                              # 与 '..' entry 的非法 tree（绕过 fsck），
 │                              # 供 readdir 跳过断言使用；另含 detached
 │                              # HEAD 独有 commit（供 /commits 清单断言）
-                              # 与 refs/remotes/origin/HEAD（供隐藏断言）、
+│                              # 与 refs/remotes/origin/HEAD（供隐藏断言）、
 │                              # refs/replace/<oid>（供 replace 不生效断言）
 └── docs/
     ├── filesystem-semantics.md  # 对用户承诺的语义（本文 3.x 的稳定化版本；
