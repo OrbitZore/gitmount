@@ -486,8 +486,9 @@ mount(8) 按助手约定转交 `-n/-s/-v/-r/-w` 标志与 `-o` 选项串；fstab
                        （见 3.5、Q13）
   --foreground / -f    前台运行（默认守护进程化）；mount(8) 的 --fake
                        由其自身消化、不会转交助手，-f 无歧义
-  --verbose / -v       输出路径解析与缓存命中日志，及超限 blob 全量
-                       解压事件（每次解压一条，即解压计数，见 3.5）
+  --verbose / -v       输出路径解析与缓存命中日志，及 blob 全量解压
+                       事件（每次解压一条，即解压计数：超限 open-pin
+                       与缓存 miss 装载各一条，见 3.5）
                        （mount(8) 的 -v 映射至此）
   -n / -s              mount(8) 转交的 no-mtab / sloppy 标志：容忍并忽略
   -r / -w              mount(8) 转交的只读/读写标志：-r 接受（默认即 ro），
@@ -841,3 +842,13 @@ gitfs/
   “getattr 不产生解压日志”断言（`-v` 下 `ls -l` 含大 blob 目录、
   解压事件计数为 0）；man 页 File metadata 与 `--blob-cache-size`
   描述同步。
+
+### 7.10 帮助文本措辞对齐（2026-09-24，review round 5/5 跟进）
+
+- **Q20 -v 帮助文本解压事件范围措辞（已决）**：§3.7 CLI 帮助文本中
+  `-v` 原仅写“超限 blob 全量解压事件”，未涵盖可缓存 blob 的 LRU
+  装载解压，与 §3.5“缓存装载的解压同样记一条 verbose 日志”及
+  man 页 `-v` 段“covering both oversized open-pin decompressions
+  and cache-miss LRU loads”存在措辞范围差；改为“blob 全量解压
+  事件（超限 open-pin 与缓存 miss 装载各一条）”，三处口径对齐，
+  纯措辞修订、功能无影响。
