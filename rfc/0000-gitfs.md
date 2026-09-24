@@ -198,10 +198,26 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 
 - **blob LRU 缓存**：键 = blob oid，值 = 不可变字节串；容量按字节计，
   默认 64 MiB，`--cache-size` 可调。命中则 `read` 为纯内存拷贝。
-- tree 遍历依赖 libgit2 内置 ODB/对象缓存，容量与开关经
-  `git_libgit2_opts(GIT_OPT_SET_CACHE_MAX_SIZE, …)` 与
-  `git_libgit2_opts(GIT_OPT_ENABLE_CACHING, …)` 调整（libgit2 公开 API
-  即此，不存在按 odb 实例设置缓存的接口）。
+- **tree/commit 依赖 libgit2 内置对象缓存，init 时显式调参**：默认 per-type
+  上限仅 4KiB（源码 `cache.c` 的 `git_cache__max_object_size[]`），序列化
+  超线的大目录 tree（~100+ entry 即超）不进缓存；而高层 fuse API 每个
+  syscall 自 root tree 重解析 O(depth) 次、attr/entry_timeout 又显式置 0
+  （见下），tree 命中率就是 `ls -R`/`find`/`du`/rsync 类元数据负载性能的
+  全部。故 init 时以 `GIT_OPT_SET_CACHE_OBJECT_LIMIT(GIT_OBJECT_TREE, 1MiB)`
+  抬线，COMMIT 同抬（commit 天然 <4KiB，仅防御病态巨型 merge commit，
+  无代价）；总预算 `GIT_OPT_SET_CACHE_MAX_SIZE` 维持默认 256MiB（1.9.7
+  实测），与 `--cache-size` **各自独立记账、互不挤占**。
+- **blob 保证不进 libgit2 缓存（防双层缓存）**：per-type 上限默认即 0
+  （从不缓存；1.9.7 实测 lookup 后缓存计数恒 0，抬限后立即计入、再读
+  命中），但这是默认值而非契约——任何一处
+  `GIT_OPT_SET_CACHE_OBJECT_LIMIT(GIT_OBJECT_BLOB, n>0)` 都会让同一份
+  字节在 libgit2 缓存（`git_blob` 包装）与自家 LRU（raw bytes）各存
+  一份、双份记账。故 init 显式写死
+  `GIT_OPT_SET_CACHE_OBJECT_LIMIT(GIT_OBJECT_BLOB, 0)`，令“恰好不
+  重复”成为“保证不重复”。pack 读入走 packfile mmap → 内核页缓存，
+  进程间共享、可回收，属正常分层而非堆内重复，与 LRU 互补不冲突；
+  `GIT_OPT_ENABLE_CACHING` 保持默认开启（libgit2 公开 API 即此，不存在
+  按 odb 实例设置缓存的接口）。
 - `/commits` 清单：**首次 `open` 时** revwalk 全量生成（push 全部 refs
   **加 HEAD**——detached HEAD 独有的 commit 也纳入清单，与 §0 "全部可达"
   的宣称一致，即可达集 = refs ∪ HEAD；`refs/remotes/<remote>/HEAD`
@@ -382,3 +398,8 @@ gitfs/
 - **Q10 statfs 口径与 CLI 黑名单（已决）**：`f_blocks` = 本地 ODB 占用
   （pack + loose，不含 alternates）；`-o` 拒绝名单补入反向键
   `rw/suid/dev`（见 3.3、3.7）。
+- **Q11 libgit2 缓存调参与防双层缓存（已决）**：tree/commit 依赖
+  libgit2 内置缓存，但显式抬 per-type 上限（tree 1MiB——默认 4KiB 会
+  漏掉大目录 tree，拖垮元数据密集负载）；blob per-type **写死 0**，
+  保证解压后 blob 仅存于自家 LRU、不双层缓存双记账；总预算维持默认
+  256MiB，与 `--cache-size` 独立记账（见 3.5）。
