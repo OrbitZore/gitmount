@@ -2,7 +2,7 @@
 
 - RFC 编号: 0000
 - 标题: gitfs — read-only git-to-FUSE 文件系统
-- 状态: Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6、§7.7、§7.8、§7.9、§7.10、§7.11、§7.12、§7.13（§7.11/§7.12/§7.13 为定稿后 mount(8) 助手协议核验勘误））
+- 状态： Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6、§7.7、§7.8、§7.9、§7.10、§7.11、§7.12、§7.13、§7.14（§7.11/§7.12/§7.13/§7.14 为定稿后 mount(8) 助手协议核验勘误））
 - 日期: 2026-09-24
 - 目标版本: 0.1.0
 
@@ -474,22 +474,32 @@ VFS 键滤除与 -N 转交口径）**：助手契约为
 为 `<repo> <dir> -o rw`，且选项恒出现在位置参数**之后**（实测如
 `<src> <dir> -f -o rw`），参数解析须容忍选项后置（GNU getopt 式
 置换，Q22c），否则主路径直接破；`rw` 必须被接受（见下选项说明），
-否则 §0/本节首推的默认调用形态必然 exit 1。fstab 条目
+否则 §0/本节首推的默认调用形态必然 exit 1。`-o` 串内的
+rw/ro 冲突（如 `-o rw,ro`）经 mount(8) 时由 libmount 折叠为单个
+键（实测后者胜：`rw,ro` → 单个 `ro`），助手不会从 mount(8)
+同时收到 rw 与 ro——fstab `ro` + CLI `-o rw` 的覆盖流同样在
+libmount 层裁决为单个到达键、到达后均为无操作（`rw` 记警告），
+挂载恒为 ro（硬编码基线），实现者无须为该组合写特殊解析（直连
+调用纵然出现 rw,ro 同串，两键亦各自为无操作，Q24c）。fstab 条目
 `/path/repo  /mnt/gitfs  gitfs  ro,blob-cache-size=128  0  0` 同样经由
 助手挂载；util-linux ≥2.35 还允许 CLI `-o` 在 fstab 选项之上增改
 （合并串中同一键可出现两次），相应覆盖语义见下"后者胜"规则。
 **`-o` 串中 VFS 键的实际到达口径（Q22a，勘误 Q21 版正文的断言——
 "通用 VFS 键由 mount(8) 翻译为挂载 syscall 标志、不会到达 gitfs"
-系事实错误；Q23a 补全实测名单并钉分类规则与键名匹配）**：libmount
+系事实错误；Q23a 补全实测名单并钉分类规则与键名匹配；Q24a 再补
+symfollow/nosymfollow/nouser 并修分诊规则锚点）**：libmount
 仅滤除固定子集（auto/noauto/comment=/x-*/loop/offset=/sizelimit=/
 defaults 及传播键），其余 VFS 键原样到达——atime/noatime/relatime/
 strictatime/lazytime/diratime/nodiratime、sync/async/dirsync、
-exec/noexec、user/users/owner/group、iversion/silent/loud/mand/
-nomand/nofs、_netdev、nofail、remount、uid=/gid=/umask=、
-context=/fscontext=/defcontext=/rootcontext=（SELinux 标签键，值含
-冒号、实测整值到达）均在列。到达的无关 VFS 键按 `rw`/ntfs-3g
+exec/noexec、user/users/owner/group/nouser、symfollow/nosymfollow、
+iversion/silent/loud/mand/nomand/nofs、_netdev、nofail、remount、
+uid=/gid=/umask=、context=/fscontext=/defcontext=/rootcontext=
+（SELinux 标签键，值含冒号、实测整值到达）均在列（acl/quiet/
+showexec/bsdgroups 等其余表内无操作键复测亦原样到达，由下述
+分诊规则表轨兜底，不逐一枚举）。到达的无关 VFS 键按 `rw`/ntfs-3g
 先例**接受并忽略**（verbose 记一条）：atime 族/sync 族/exec 族/
-user 族/iversion/silent/loud/mand/nomand/nofs/_netdev/nofail——
+user 族（含 nouser）/symfollow/nosymfollow/iversion/silent/loud/
+mand/nomand/nofs/_netdev/nofail——
 ro、atime≡mtime 语义下均无害，`mount -t gitfs -o
 noatime,nodiratime repo dir` 这类常见习惯、fstab 的 `user`
 （非 root 挂载）与 boot 常见的 `nofail`/`_netdev` 均不因未知键
@@ -499,19 +509,31 @@ noatime,nodiratime repo dir` 这类常见习惯、fstab 的 `user`
 语义，静默忽略会掩盖用户意图——SELinux 环境以 `context=` 挂载
 是常规操作，须显式失败而非静默丢标签，与 `uid=` 同理，Q23a）。
 
-**到达键的分诊规则（Q23a，规则优先于枚举）**：(1) 名单匹配按
-**截首个 `=` 取键名**钉住——`user=alice`、`nofail=1` 实测带值
-到达，按键名归入相应分诊、值不再校验（`context=` 族值含冒号，
-逗号切分不受影响、仅不得再按冒号拆分值）；(2) 凡 mount(8)
-通用 VFS 选项表（man mount(8) "Filesystem-independent mount
-options" 一节）所列、且对 gitfs 为无操作的键（ro 基线、
-atime≡mtime、无属主映射语义下无效果）→ 接受并忽略、verbose
-记一条；该表中对 gitfs 有语义或安全影响者（suid/dev、remount、
-uid=/gid=/umask=、context= 族）→ 专用错误退出 1；(3) 不属该表的
-键透传 libfuse（未知 → 退出 1）。上列枚举名单是 util-linux
-2.42.3 的实测快照，未来 util-linux 演进使新的通用 VFS 键到达
-`-o` 串时按本规则分诊，而非因枚举缺漏落入 libfuse 拒绝（连续
-三轮 review 均发现枚举漏键，故钉规则防再漏）。
+**到达键的分诊规则（Q23a 钉规则；Q24a 改双轨锚点——原"表内/
+表外"单轨与枚举快照不自洽且自身会漏：`nofs` 在枚举接受名单内、
+却不在 util-linux 2.42.3 man 表内，按表外条款会误落 libfuse 拒
+绝；演进键 `symfollow`（2.41+ 新增、实测原样到达、对 gitfs 为
+无操作）不在表内亦不在枚举内，其逆键 `nosymfollow`（表内）却
+被接受）**：(1) 名单匹配按**截首个 `=` 取键名**钉住——
+`user=alice`、`nofail=1` 实测带值到达，按键名归入相应分诊、
+值不再校验（`context=` 族值含冒号，逗号切分不受影响、仅不得
+再按冒号拆分值）；(2) **枚举轨优先**——上列实测枚举名单所列
+键（含表外的 `nofs`/`symfollow`）一律按名单分诊为接受并忽略、
+verbose 记一条；(3) **表轨兜底**——凡 mount(8) 通用 VFS 选项
+表（man mount(8) "Filesystem-independent mount options" 一节）
+所列、且对 gitfs 为无操作的键（ro 基线、atime≡mtime、无属主
+映射语义下无效果；含枚举未逐一收录的 `acl`/`quiet`/`showexec`/
+`bsdgroups` 等表内无操作键）→ 接受并忽略、verbose 记一条；
+该表中对 gitfs 有语义或安全影响者（suid/dev、remount、uid=/
+gid=/umask=、context= 族）→ 专用错误退出 1；(4) 两轨皆不属的
+键透传 libfuse（未知 → 退出 1）。枚举名单是 util-linux 2.42.3
+的实测快照，对表内键不宣称穷尽（表轨兜底）；**演进条款**：
+未来 util-linux 版本使新的表外键到达 `-o` 串时（如 2.41+ 的
+`symfollow`），按"是否对 gitfs 无操作"人工分诊入枚举名单，并
+写入维护核对单（新 util-linux 发布 → diff man 表与 libmount
+转发键集 → 分诊 → 更新枚举名单与 §4 用例），而非因枚举缺漏
+落入 libfuse 拒绝（连续四轮 review 均发现枚举或锚点漏键，故钉
+双轨锚点 + 演进条款防再漏）。
 
 **user 族实测附带键（Q23d 措辞精化）**：`user`/`users` 隐式附带
 `noexec,nosuid,nodev` 全三项，`owner`/`group` 仅附带
@@ -540,16 +562,21 @@ owner/group 不得写 noexec 存在性断言。直连调用时出现在 `-o`
                        （ntfs-3g 同先例）；到达 `-o` 串的无关 VFS 键
                        （atime/noatime/relatime/strictatime/lazytime/
                        diratime/nodiratime、sync/async/dirsync、
-                       exec/noexec、user/users/owner/group（user/
-                       users 附带 noexec,nosuid,nodev、owner/group
-                       仅 nosuid,nodev、user=<name> 无附带，Q23d）、
+                       exec/noexec、user/users/owner/group/nouser
+                       （user/users 附带 noexec,nosuid,nodev、
+                       owner/group 仅 nosuid,nodev、user=<name> 无
+                       附带，Q23d）、symfollow/nosymfollow、
                        iversion/silent/loud/mand/nomand/nofs、
-                       _netdev、nofail，Q22a/Q23a）一律接受并忽略、
-                       verbose 记一条——名单匹配按截首个 = 取键名钉住
-                       （user=alice、nofail=1 按键名归入，Q23a），
-                       且规则优先于枚举：mount(8) 通用 VFS 选项表中
-                       对 gitfs 无操作的键均接受忽略，防 util-linux
-                       演进再漏键；ro、atime≡mtime 语义下忽略无
+                       _netdev、nofail，Q22a/Q23a/Q24a）一律接受并
+                       忽略、verbose 记一条——名单匹配按截首个 = 取
+                       键名钉住（user=alice、nofail=1 按键名归入，
+                       Q23a），分诊为双轨锚点（Q24a）：枚举名单
+                       优先，mount(8) 通用 VFS 选项表中其余对
+                       gitfs 无操作的键（acl/quiet/showexec/
+                       bsdgroups 等）兜底接受忽略，表外新键（如
+                       util-linux 2.41+ 的 symfollow）人工分诊入
+                       枚举名单、未分诊的表外键透传 libfuse，防
+                       util-linux 演进再漏键；ro、atime≡mtime 语义下忽略无
                        害（`-o noatime,nodiratime` 习惯用法与 fstab
                        `user`/`nofail`/`_netdev` 场景不因未知键
                        失败）；反向键 suid/dev 报错退出 1，
@@ -722,7 +749,7 @@ gitfs/
     断言：大容量 `--blob-cache-size` 挂载下首次读大可缓存 blob 期
     间并发的根 readdir 不被长时间阻塞（自管 runner、宽松阈值，见
     3.5/Q19a）；
-    **mount(8) exec 路径七场景（Q21，Q22 扩至五，Q23 扩至七）**：经真实
+    **mount(8) exec 路径九场景（Q21，Q22 扩至五，Q23 扩至七，Q24 扩至九）**：经真实
     `mount -t gitfs`（需 util-linux ≥2.35 与特权环境，CI 无特权时
     skip 标记）走 libmount exec_helper 全链路：(1) 默认调用
     `mount -t gitfs <repo> <dir>`
@@ -745,8 +772,12 @@ gitfs/
     （verbose 记两条）且挂载成功、卸载干净（Q23a）；(7) `-o
     user=alice` 键值形态（fstab `user=alice` 或 CLI `-o
     user=alice`）——断言带值到达、按"截首个 = 取键名"匹配入忽略
-    名单（实测不附带任何隐式键，Q23d）且挂载成功（Q23a）；另以
-    直连调用断言 `-o remount`、`-o uid=1000` 与 `-o
+    名单（实测不附带任何隐式键，Q23d）且挂载成功（Q23a）；(8)
+    `mount -t gitfs -o symfollow <repo> <dir>`——util-linux 2.41+
+    演进键（man 表外、枚举轨收录），断言原样到达且被接受并忽略
+    （verbose 记一条）且挂载成功、卸载干净（Q24a）；(9) `-o
+    nouser`（man 表内无操作键）——断言原样到达且被接受并忽略、
+    挂载成功、卸载干净（Q24a）；另以直连调用断言 `-o remount`、`-o uid=1000` 与 `-o
     context=system_u:object_r:user_home_t:s0`（值含冒号、整值
     到达）退出 1 且错误文案专用（Q22a/Q23a）；
     另增 st_blocks 断言：`du`（512B 块口径）对普通
@@ -801,9 +832,9 @@ gitfs/
   `rw/suid/dev`（见 3.3、3.7）（`rw` 经 §7.11(a)/Q21 勘误改为接受为
   无操作并记 stderr 警告——libmount 对助手调用无条件预置该键；现行
   拒绝名单为 `suid/dev`；到达 `-o` 串的无关 VFS 键（noatime 族等）
-  经 §7.12(a)/Q22、§7.13(a)/Q23（补全名单并钉分诊规则）定为接受
-  并忽略、remount/uid=/context= 等无对应语义的键
-  退出 1）。
+  经 §7.12(a)/Q22、§7.13(a)/Q23（补全名单并钉分诊规则）、
+  §7.14(a)/Q24（再补名单并改双轨锚点）定为接受并忽略、
+  remount/uid=/context= 等无对应语义的键退出 1）。
 - **Q11 libgit2 缓存调参与防双层缓存（已决）**：tree/commit 依赖
   libgit2 内置缓存，但显式抬 per-type 上限（tree 1MiB——默认 4KiB 会
   漏掉大目录 tree，拖垮元数据密集负载）；blob per-type **写死 0**，
@@ -1061,7 +1092,9 @@ gitfs/
   umask= 均原样到达 `-o` 串（该到达名单与附带键措辞经
   §7.13(a)(d)/Q23 补全与精化：补 atime/nodiratime/iversion/
   silent/loud/mand/nomand/nofs 及 context= 族，并钉"截首个 =
-  取键名"与规则优先的分诊），按原口径全部命中"未知键 → libfuse
+  取键名"与规则优先的分诊；复经 §7.14(a)/Q24 补 symfollow/
+  nosymfollow/nouser 入名单、锚点改"枚举优先 + 表轨兜底"双轨），
+  按原口径全部命中"未知键 → libfuse
   拒绝 → exit 1"——`mount -t gitfs -o noatime repo dir`（常见
   习惯）必失败，fstab 含 `user`（非 root 挂载）或 `nofail`/
   `_netdev`（boot 常见）必失败，与 §7.11(a) 的 rw 问题同类、主
@@ -1112,7 +1145,9 @@ gitfs/
   页 INVOCATION/OPTIONS 同步，§4 的 mount(8) exec 路径用例由
   五场景扩至七场景（增 `-o noatime,nodiratime` 组合与
   `user=alice` 键值形态两用例，另以直连调用断言 remount/uid=/
-  context= 的专用错误）；
+  context= 的专用错误；名单与"表内/表外"单轨锚点复经
+  §7.14(a)/Q24 勘误——补 symfollow/nosymfollow/nouser 入名单、
+  锚点改双轨并加演进条款）；
   (b) **-s 不实现 sloppy 放宽（小）**：mount(8) 文档语义为"忽略
   文件系统不支持的挂载选项"，但静默吞掉拼写错误的自有键会掩盖
   配置错误；显式文档化 `-s` 仅标志本身被容忍、不放松未知 `-o`
@@ -1127,3 +1162,41 @@ gitfs/
   操作、行为不受影响，但措辞改为实测口径，§4 场景 5 对
   owner/group 不得写 noexec 存在性断言（§3.7 正文与帮助文本、
   man 页 INVOCATION 同步，Q23d）。
+
+### 7.14 分诊规则双轨锚点、rw/ro 折叠钉住与 man 页 argv 序（2026-09-24，定稿后 review round 4 跟进）
+
+- **Q24 到达键分诊锚点双轨化、-o rw,ro 折叠与 man 页 argv 展示
+  （已决）**：round 4 以本机 util-linux 2.42.3 真实 mount(8) exec
+  助手复测发现 §7.13(a) 的规则锚点（mount(8) man
+  "Filesystem-independent mount options" 表）与枚举快照不自洽且
+  自身会漏，修订三项：
+  (a) **锚点改双轨 + 名单补全（中）**：`nofs` 在枚举接受名单内、
+  却不在 util-linux 2.42.3 man 表内——按 §7.13(a) 规则(3) 落
+  "表外 → 透传 libfuse → 退出 1"，与枚举的"接受并忽略"直接矛
+  盾；`symfollow`（util-linux 2.41+ 新 VFS 键，实测原样到达、对
+  gitfs 为无操作）不在表内亦不在枚举内——按规则退出 1，而其逆
+  键 `nosymfollow`（表内）被接受，§7.13(a)"防 util-linux 演进
+  再漏"的目标恰被 symfollow 这一演进键击穿；枚举自称 2.42.3
+  实测快照却漏收实测到达且表内的 `nouser`/`nosymfollow`。修订：
+  `symfollow`/`nosymfollow`/`nouser` 补入忽略名单（`acl`/
+  `quiet`/`showexec`/`bsdgroups` 等其余实测到达的表内无操作键由
+  表轨兜底、不逐一枚举）；分诊规则锚点改为**"枚举名单优先 +
+  表内无操作键兜底"双轨**（枚举轨覆盖表外键 nofs/symfollow，
+  表轨覆盖未枚举的表内键），并为表外新到达键加**演进条款**：
+  新 util-linux 版本发布时按"是否对 gitfs 无操作"人工分诊入
+  枚举名单，写入维护核对单（diff man 表与 libmount 转发键集 →
+  分诊 → 更新枚举名单与 §4 用例）；§3.7 正文与帮助文本、
+  man 页 OPTIONS/INVOCATION 同步，§4 的 mount(8) exec 路径用例
+  由七场景扩至九场景（增 `-o symfollow` 与 `-o nouser` 到达
+  用例）；
+  (b) **man 页 INVOCATION argv 展示自相矛盾（小）**：同段先记
+  实测"选项在位置参数之后"，后又写 invokes `mount.gitfs -o rw
+  repo dir`（选项前置形态）——改为 `mount.gitfs repo dir -o rw`，
+  与实测 argv 形态一致；
+  (c) **-o rw,ro 同串折叠钉住（小）**：实测 libmount 将同串
+  rw/ro 折叠为单个键（后者胜，`rw,ro` → 单个 `ro`），助手不会
+  从 mount(8) 同时收到 rw 与 ro、无须自行解析该组合——fstab
+  `ro` + CLI `-o rw` 的覆盖流同样在 libmount 层裁决为单个到达
+  键、到达后均为无操作（`rw` 记警告），挂载恒为 ro（直连调用
+  纵然出现 rw,ro 同串，两键亦各自为无操作）；§3.7 与 man 页
+  INVOCATION 各以一段钉住。
