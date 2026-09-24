@@ -2,7 +2,7 @@
 
 - RFC 编号: 0000
 - 标题: gitfs — read-only git-to-FUSE 文件系统
-- 状态: Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6）
+- 状态: Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6、§7.7）
 - 日期: 2026-09-24
 - 目标版本: 0.1.0
 
@@ -111,6 +111,15 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 
 - ref 名规则（git check-ref-format）禁用空格、控制字符及 `~^:?*[\` 等，
   天然是合法文件名；可含 Unicode（如中文），直接作为文件名。
+- **ref 目标非 commit 的统一口径（Q17b）**：`/tag/<name>`、
+  `/branch/<name>`、`/remote/<remote>/<b>` 与 `/HEAD` 的解析一律
+  **peel 至 commit** 后取其 root tree；peel 失败——ref 直接指向
+  blob/tree（除 tag 外，分支、远端跟踪 ref 与 HEAD 经手工
+  `git update-ref` 同样可置于该形态，git 均允许）——一律 `ENOENT`
+  并记警告日志，v0.1 不呈现非 commit 目标（与上文 `/tag` 条目同
+  口径，钉住全域行为、避免实现者按入口类推不一；§3.5 的 `commits`
+  清单生成对同类 ref 则跳过、不算错误——入口不可见、清单不受
+  拖累，两处口径互补）。
 - **tree entry 名不受 check-ref-format 约束**，可为任意字节（空格、控制
   字符、非 UTF-8 序列）：git 对象格式保证 entry 名不含 `/`（含 `/` 会被
   拆成嵌套 tree）与 NUL（tree 条目的格式分隔符），因此**按原始字节透传**
@@ -224,8 +233,8 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 |---|---|
 | `getattr` | 路径 → 对象（3.1），失败 `ENOENT`；`commits` 恒为纯缓存读（未生成时 `st_size=0`），**不**触发 revwalk 或指纹重算（见 3.5） |
 | `readdir` | 根：固定列表；`branch/tag/remote`：枚举 ref（含 `/` 的名字按目录分组）；`commit`：**恒为空**；tree：枚举 entries（含 `.gitfs-submodule` 合成项）——全部目录（含根）的输出顺序一律按分量原始字节字典序（见 3.1）。注册 `opendir/releasedir`：枚举列表快照挂于 `fi->fh`，保证单目录流内 offset 续读稳定（fuse3 要求），跨目录流实时反映 ref 变化 |
-| `open`/`release` | 仅校验 `O_RDONLY` 系标志（写标志 → `EROFS`，与内核对 ro 挂载的判定一致）；`commits` 首次 `open` 触发生成（见 3.5），且把当前缓冲版本**钉住于 `fi->fh`**——同一次 open 的所有 read 分片读自同一快照，refs 中途变化不影响（与 readdir 的目录流快照同构），`release` 时解除钉住；`.gitfs.json` 挂载期内不可变，无需钉住 |
-| `read` | 定位 blob（经 LRU 缓存），拷贝 `[offset, offset+size)` 越界截断；合成文件（`commits`、`.gitfs.json`、`.gitfs-submodule`）为整块只读缓冲，`commits` 读 open 时钉住的版本 |
+| `open`/`release` | 仅校验 `O_RDONLY` 系标志（写标志 → `EROFS`，与内核对 ro 挂载的判定一致）；`commits` 首次 `open` 触发生成（见 3.5），且把当前缓冲版本**钉住于 `fi->fh`**——同一次 open 的所有 read 分片读自同一快照，refs 中途变化不影响（与 readdir 的目录流快照同构），`release` 时解除钉住；超限 blob（大于 `--blob-cache-size`）的 `open` 同构 open-pin：一次性 lookup + 全量解压，解压块钉住于 `fi->fh`、`release` 释放（见 3.5）；`.gitfs.json` 挂载期内不可变，无需钉住 |
+| `read` | 定位 blob（可缓存者经 LRU 缓存；超限者读 open 时钉住的解压块，见 3.5），拷贝 `[offset, offset+size)` 越界截断；合成文件（`commits`、`.gitfs.json`、`.gitfs-submodule`）为整块只读缓冲，`commits` 读 open 时钉住的版本 |
 | `readlink` | symlink blob 内容；内容含嵌入 NUL 时**截断至首个 NUL**（内核 symlink 目标不可含 NUL；与 `git checkout` 的事实行为一致，显式同语义而非 `EIO`）；空 blob → 返回长度 0 的空目标；超过 PATH_MAX → `ENAMETOOLONG` |
 | `statfs` | 汇报本地 ODB 占用为 `f_blocks`（全部 packfile 字节 + loose 对象字节；alternates 指向的外部存储不计入，启用 alternates 时 verbose 日志提示），块大小 4KiB；`f_bfree = f_bavail = 0`——只读卷惯例是 0 空闲，`df` 显示 100% 已用，向用户明确传达"无任何可写空间"（若报全量可用，`df` 会显示 0% 已用，易误导）；`f_files = f_ffree = 0`（精确 inode 计数需全量遍历，v0.1 不承诺，内核与 `df` 均容忍 0） |
 | 其余（`mknod/mkdir/write/…`） | 返回 `EROFS` 或不注册（fuse3 只读挂载兜底）；**xattr 族**（`getxattr/setxattr/listxattr/removexattr`）一律不注册 → libfuse 缺省 `ENOSYS`，内核标记“无 xattr”后统一向用户态报 `ENOTSUP`（SELinux 等环境的 `security.*`/statx 附加字段查询命中此路径，干净短路而非逐次回环） |
@@ -264,14 +273,28 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 - **blob LRU 缓存**：键 = blob oid，值 = 不可变字节串；容量按字节计，
   默认 64 MiB，`--blob-cache-size` 可调（Q13 前名 `--cache-size`）。命中则
   `read` 为纯内存拷贝。
-  **超限 blob 绕过缓存直读（Q16e）**：单个 blob 大于当前
-  `--blob-cache-size` 时**不插入缓存、也不触发既有条目逐出**（为单个
-  超限对象清空整池只会引起缓存抖动），其每次 read 经 libgit2 直取
-  内容后切片拷贝——packfile 走 mmap，重复读由内核页缓存兜底，开销
-  可接受；流式按需解压留作后续优化，v0.1 不做。**并发装载天然
-  single-flight**：blob 装载与直读均在 3.4 的单互斥下串行执行——
-  可缓存 blob 由首个装载线程填充、其余线程命中复用；超限 blob 的
-  各次直读亦被串行化——不存在同一 blob 的重复并发解压或缓存竞态，
+  **超限 blob 绕过缓存、open-pin 一次性解压（Q16e，Q17a 钉住解压
+  时机）**：单个 blob 大于当前 `--blob-cache-size` 时**不插入缓存、
+  也不触发既有条目逐出**（为单个超限对象清空整池只会引起缓存抖动）。
+  其解压时机钉住为**与 `commits` 同构的 open-pin**（见 3.3）：
+  `open` 时在 3.4 的单互斥下完成一次 `git_blob` lookup 与**全量
+  解压**，解压后字节块（git_blob 句柄的 rawdata）钉住于 `fi->fh`，
+  该 open 内所有 read 分片直接自该块切片拷贝，`release` 时释放——
+  单次 open 的顺序分片读**只解压一次**。逐 read 重做 lookup+全量
+  解压的字面直读会使大 blob 顺序分片读呈 O(size²) 解压放大，故
+  不采用：blob per-type 缓存已写死 0（见下）、自家 LRU 又不收
+  超限对象，每次 read 必然重新解压；且解压结果不在内核页缓存
+  ——页缓存只保留 mmap 的 pack 原始字节——“页缓存兜底”并不能
+  消除重复解压。**内存峰值（显式声明）**：超限 blob 的解压块不
+  进共享缓存、按 open 独立持有，峰值 = Σ 各未 `release` 的超限
+  blob open 所持 blob 大小（并发打开同一超限 blob 即“并发 open
+  数 × blob 大小”量级），由调用方自行控制；v0.1 不做跨 open
+  引用计数共享，流式按需解压（解压块不整块驻留）留作后续优化。
+  open 时装载失败的错误按 3.3 映射返回（对象被外部 gc 删除 →
+  `ENOENT`、pack 中途失效 → `EIO`），不产生钉住句柄。**并发装载
+  天然 single-flight**：blob 装载（可缓存装载与超限的一次性解压）
+  均在 3.4 的单互斥下串行执行——可缓存 blob 由首个装载线程填充、
+  其余线程命中复用；不存在同一 blob 的重复并发解压或缓存竞态，
   无需额外协调结构。
 - **tree/commit 依赖 libgit2 内置对象缓存，init 时显式调参**：默认 per-type
   上限仅 4KiB（源码 `cache.c` 的 `git_cache__max_object_size[]`），序列化
@@ -367,7 +390,10 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 `repository` 字段对仓库路径中构成**非法 UTF-8 序列**的字节按 `%XX`
 百分号转义（ASCII 与合法多字节序列原样保留），任意文件系统路径都能
 产出可被严格 JSON 解析器接受的文本；`head` 为 ref 名或 oid（ASCII）、
-`mounted_at`/`cache` 数值不受影响。
+`mounted_at`/`cache` 数值不受影响。该转义**仅保证 JSON 合法、
+不承诺可逆**——路径中本就存在的字面 `%XX`（ASCII 百分号 + 两位
+十六进制）与转义产物在输出中不可区分，探测脚本不得据此逆推原始
+路径字节（需精确路径请用挂载参数或系统侧信息）。
 
 **失效语义（显式声明）**：`.gitfs.json` 是**挂载时刻的快照**，挂载期间
 不可变——`repository`、`mounted_at`、`cache` 配置本就不随时间变化；
@@ -489,7 +515,9 @@ gitfs/
 │                              # refs/replace/<oid>（供 replace 不生效断
 │                              # 言）、refs/notes/keep 与 refs/stash
 │                              # （供 commits 入集口径断言，对齐
-│                              # rev-list --all oracle）
+│                              # rev-list --all oracle）、update-ref
+│                              # 指向 blob 的分支 ref（供非 commit
+│                              # 目标入口 ENOENT 断言，见 3.1/Q17b）
 └── docs/
     ├── filesystem-semantics.md  # 对用户承诺的语义（本文 3.x 的稳定化版本；
     │                          # 必含"gc/prune 并发""空仓库""readdir 字节
@@ -518,8 +546,13 @@ gitfs/
     ref 的 commit 在列）、readdir 顺序断言（根与 branch/tag/remote/
     tree 按分量原始字节字典序，含嵌套 ref 分组前缀与
     `.gitfs-submodule` 合成项；oracle 以 `LC_ALL=C sort` 归一比对）、
+    非 commit 目标入口：ref 指向 blob 的分支（update-ref 手工构造）
+    → `/branch/<name>` `ENOENT`（与 `/tag` 同口径，见 3.1/Q17b）、
     超限 blob 直读（`--blob-cache-size=1` 挂载下读取大于容量的
-    blob，内容与 `git cat-file` 一致且既有缓存条目不被逐出）；
+    blob，顺序分片整读、内容逐块与 `git cat-file` 一致且既有缓存
+    条目不被逐出；open-pin 语义保证单次顺序读只解压一次——以
+    “整读耗时不随分片数平方增长”的宽松比值断言在自管 runner 上
+    作参考检查（共享 runner 抖动大，不作门禁），见 3.5/Q17a）；
   - CI 上 `/dev/fuse` 不可用时集成测试自动 skip（标记），在自管 runner 跑全量。
 - **可观测性**：`-v/--verbose` 输出解析日志；错误信息含 oid 与 errno 上下文。
 
@@ -664,13 +697,36 @@ gitfs/
   （目录名附加 `/` 的比较规则，与纯字节序在 `foo`/`foo.txt` 组合上
   相反），`.gitfs-submodule` 合成项同名参与排序；§4 增顺序断言；
   (d) 合成入口元数据补全：`commits`/`.gitfs.json` 为 `S_IFREG|0444`、
-  `nlink=1`；根与 `/branch`//`tag`//`remote`//`commit`//`/HEAD` 入口
-  目录的 mtime/ctime/atime = 挂载时刻（`nlink=2` 通用规则）；
+  `nlink=1`；根与 `/branch`、`/tag`、`/remote`、`/commit`、`/HEAD`
+  入口目录的 mtime/ctime/atime = 挂载时刻（`nlink=2` 通用规则）；
   (e) 超限 blob（单 blob > `--blob-cache-size`）绕过缓存直读：不插入、
-  不逐出既有条目，直读经 libgit2 + packfile mmap/内核页缓存；blob
-  装载在 3.4 单互斥下串行执行，天然 single-flight；§4 增超限 blob
-  读用例；
+  不逐出既有条目；解压时机经 §7.7(a) 细化为 open-pin 一次性解压
+  （原“逐 read 直取、内核页缓存兜底”表述不能消除重复解压，§3.5
+  已相应修订）；blob 装载在 3.4 单互斥下串行执行，天然
+  single-flight；§4 增超限 blob 读用例；
   (f) 小项：`.gitfs.json` 的 `repository` 对非法 UTF-8 字节按 `%XX`
   百分号转义（保证 JSON 合法 UTF-8）；`/commit/<oid>` 仅接受小写
   十六进制（大写 → ENOENT）；§3.5/§7.2(b) 的 sha256 清单估算由
   74MB 勘误为 71.5MB（65B × 110 万）。
+
+### 7.7 解压时机与非 commit 入口口径（2026-09-24，review round 2/5 跟进）
+
+- **Q17 超限 blob 解压时机、非 tag 入口 peel 口径与文档勘误（已决）**：
+  (a) 超限 blob（单 blob > `--blob-cache-size`）的直读钉住为
+  **open-pin 一次性解压**：`open` 时在单互斥下一次 `git_blob`
+  lookup + 全量解压，解压块钉住于 `fi->fh`、`release` 释放——与
+  `commits` 的 open-pin 同构，单次 open 的顺序分片读只解压一次，
+  消除逐 read 重解压的 O(size²) 放大；内核页缓存只覆盖 mmap 的
+  pack 原始字节、不含解压结果，不能作为免重解压的依据（§3.5
+  原表述已修订）；内存峰值显式声明：Σ 并发未 `release` 的超限
+  blob open 所持 blob 大小，v0.1 不做跨 open 共享，流式按需解压
+  留作后续优化（见 3.3、3.5）；
+  (b) `/branch/<name>`、`/remote/<remote>/<b>`、`/HEAD` 的 ref 目标
+  非 commit（手工 `git update-ref` 可构造）时与 `/tag` 统一口径：
+  `ENOENT` + 警告日志，v0.1 不呈现非 commit 目标（见 3.1）；
+  (c) 勘误：§7.6(d) 入口目录列表的双斜杠排版笔误修正；§3.6 补
+  `%XX` 转义“仅保证 JSON 合法、不承诺可逆”声明（字面 `%XX` 与
+  转义产物不可区分）；
+  (d) §4 增用例：非 commit 目标分支入口 `ENOENT`、超限 blob 顺序
+  分片整读（内容逐块比对 + “整读耗时不随分片数平方增长”的参考
+  断言，见 §4）。

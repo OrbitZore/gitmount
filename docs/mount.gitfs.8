@@ -1,4 +1,4 @@
-.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q16)
+.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q17)
 .TH MOUNT.GITFS 8 "2026-09-24" "gitfs 0.1.0" "System Administration"
 .SH NAME
 mount.gitfs \- mount a git repository as a read\-only FUSE filesystem
@@ -89,6 +89,12 @@ Branch names containing
 (e.g.\&
 .IR feature/foo )
 are rendered as nested directories.
+A branch whose ref does not peel to a commit (e.g.\& manually
+pointed at a blob or tree with
+.BR "git update\-ref" )
+is not presented
+.RB ( ENOENT ,
+with a warning logged).
 .TP
 .I tag/
 All tags, annotated and lightweight.
@@ -121,7 +127,9 @@ read directly from
 The symbolic ref
 .I refs/remotes/<remote>/HEAD
 is hidden (access yields
-.BR ENOENT ).
+.BR ENOENT );
+a ref that does not peel to a commit is likewise not presented
+.RB ( ENOENT ).
 .TP
 .I HEAD/
 Snapshot of the current
@@ -129,7 +137,9 @@ Snapshot of the current
 An unborn
 .B HEAD
 yields
-.BR ENOENT .
+.BR ENOENT ;
+so does a HEAD pointing at a non\-commit object (same rule as
+tags and branches).
 .TP
 .I commits
 Read\-only text file listing the full oid of every commit reachable from
@@ -173,7 +183,10 @@ If the repository path contains bytes that are not valid UTF\-8, the
 field percent\-escapes them as
 .BI % XX
 (ASCII and valid multi\-byte sequences are kept verbatim) so the file
-remains valid JSON.
+remains valid JSON; the escaping is not reversible (a literal
+.BI % XX
+already present in the path is indistinguishable from an escaped
+byte).
 It is an immutable snapshot taken at mount time and does not track later
 HEAD movement \(em use
 .I HEAD/
@@ -224,9 +237,16 @@ unknown keys are rejected by libfuse (exit status 1).
 .TP
 .BI \-\-blob\-cache\-size \ MiB
 Blob LRU cache limit in MiB (default 64).
-A single blob larger than the limit bypasses the cache and is read
-directly (nothing is evicted to make room; repeated reads fall back to
-the kernel page cache over the mmap'ed packfile).
+A single blob larger than the limit bypasses the cache: it is looked up
+and fully decompressed once at
+.BR open ,
+the decompressed block is pinned on the file handle for the lifetime
+of the open, and
+.B release
+frees it, so a sequential read decompresses exactly once (nothing is
+evicted to make room).
+The memory footprint of oversized blobs is the sum of their sizes
+across concurrently open handles.
 The value must be a positive integer; 0, negative, or unparseable
 values are usage errors (exit status 1); there is no artificial upper
 cap (bounded only by available memory).
