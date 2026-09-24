@@ -1,4 +1,4 @@
-.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q22)
+.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q23)
 .TH MOUNT.GITFS 8 "2026-09-24" "gitfs 0.1.0" "System Administration"
 .SH NAME
 mount.gitfs \- mount a git repository as a read\-only FUSE filesystem
@@ -110,11 +110,14 @@ before the helper is exec'd (auto, noauto, comment=, x\-*, loop,
 offset=, sizelimit=, defaults, and the propagation options); every
 other VFS option reaches the helper verbatim in the
 .B \-o
-string \(em the atime family (noatime, relatime, strictatime,
-lazytime, diratime), the sync family (sync, async, dirsync), the
-exec family (exec, noexec), the user family (user, users, owner,
-group \(em which also implicitly adds noexec, nosuid, nodev),
-_netdev, nofail, remount, and uid=/gid=/umask= \(em and is
+string \(em the atime family (atime, noatime, relatime,
+strictatime, lazytime, diratime, nodiratime), the sync family (sync,
+async, dirsync), the exec family (exec, noexec), the user family (user,
+users, owner, group \(em user and users implicitly add noexec, nosuid,
+nodev, while owner and group only add nosuid, nodev), iversion, silent,
+loud, mand, nomand, nofs, _netdev, nofail, remount, uid=/gid=/umask=,
+and the SELinux label keys context=/fscontext=/defcontext=/rootcontext=
+(values contain colons) \(em and is
 classified as described under
 .BR OPTIONS .
 With util\-linux >= 2.35 a command\-line
@@ -278,25 +281,46 @@ the same convention).
 Generic VFS options that libmount forwards verbatim in the \-o
 string (only the fixed subset named above is filtered before the
 helper is exec'd) are likewise accepted and ignored, each noted by
-one verbose line: the atime family (noatime, relatime,
-strictatime, lazytime, diratime), the sync family (sync, async,
-dirsync), the exec family (exec, noexec), the user family (user,
-users, owner, group), _netdev, and nofail \(em all harmless under
+one verbose line: the atime family (atime, noatime, relatime,
+strictatime, lazytime, diratime, nodiratime), the sync family (sync,
+async, dirsync), the exec family (exec, noexec), the user family
+(user, users, owner, group), iversion, silent, loud, mand, nomand,
+nofs, _netdev, and nofail \(em all harmless under
 the hardcoded
 .B ro
 and the atime≡mtime semantics, so common habits such as
-.B "mount \-t gitfs \-o noatime repo dir"
+.B "mount \-t gitfs \-o noatime,nodiratime repo dir"
 and fstab entries with
 .B user
 (for non\-root mounting) or
 .B "nofail / _netdev"
 (common at boot) keep working (rw/ntfs\-3g precedent).
-.B remount
-and
-.BI uid= / gid= / umask=
-are usage errors with dedicated error messages (v0.1 has no remount
-or ownership\-mapping semantics; silently ignoring them would hide
-the user's intent).
+List matching is by key name, cut at the first
+.BR = :
+valued spellings such as
+.BI user= alice
+or
+.BI nofail= 1
+are matched by key name alone (the value is not inspected).
+The classification is a rule, not a bare enumeration: any option from
+mount(8)'s filesystem\-independent options table (see the
+.BR mount (8)
+manual, "Filesystem\-independent mount options") that is a no\-op for
+gitfs is accepted and ignored; table options that would change gitfs
+semantics or security intent are usage errors; keys outside the table
+are forwarded to libfuse \(em so future util\-linux evolution that
+forwards new generic VFS keys is classified by rule instead of falling
+through to libfuse rejection.
+.BR remount ,
+.BI uid= / gid= / umask= ,
+and the SELinux label keys
+.BI context= / fscontext= / defcontext= / rootcontext=
+are usage errors with dedicated error messages (v0.1 has no remount,
+ownership\-mapping, or security\-label semantics; silently ignoring
+them would hide the user's intent \(em mounting with
+.BI context=
+is routine under SELinux and must fail loudly rather than silently
+drop the label).
 The remaining reverse keys
 .RB ( suid ,
 .B dev )
@@ -381,8 +405,12 @@ Fake mode \(em the form in which
 .B \-\-fake
 is forwarded to helpers (libmount's exec_helper passes
 .BR \-f ).
-All arguments and options are fully validated, then the helper exits
-with status 0 without mounting anything.
+All arguments and options are fully validated, including opening
+the repository (an unreadable or non\-git repository exits with
+status 2); only the mount and the daemonization are skipped, so a
+fake run does not green\-light an fstab entry that would fail only
+at boot time.
+On success the helper exits with status 0 without mounting anything.
 .TP
 .BR \-v ", " \-\-verbose
 Log path resolution, cache hits, and blob decompression events to
@@ -401,6 +429,12 @@ reaches the helper as
 per the helper contract, although
 .BR mount (8)
 currently refuses to switch namespaces before exec'ing a helper).
+Note that
+.B \-s
+does not relax unknown\-key rejection: mount(8) documents sloppy as
+ignoring mount options not supported by the filesystem, but silently
+swallowing mistyped gitfs\-specific keys would hide configuration
+errors, so unknown \-o keys are still classified as described above.
 .TP
 .B \-r ", " \-w
 Never received from
@@ -616,7 +650,7 @@ exit status
 propagates for a helper invocation), a graceful foreground
 termination (SIGINT/SIGTERM), or a successful fake run of
 .B \-f
-(arguments validated, nothing mounted).
+(arguments and the repository validated, nothing mounted).
 Unmounting is performed by
 .BR umount (8)
 or
@@ -636,7 +670,7 @@ Mount failure.
 .SH EXAMPLES
 .nf
 mount \-t gitfs ~/src/myproj /mnt/gitfs
-mount \-t gitfs \-o noatime ~/src/myproj /mnt/gitfs   # VFS no\-op keys accepted
+mount \-t gitfs \-o noatime,nodiratime ~/src/myproj /mnt/gitfs   # VFS no\-op keys accepted
 mount \-\-fake \-t gitfs ~/src/myproj /mnt/gitfs   # forwarded as \-f: validate only
 ls /mnt/gitfs/branch/main/src
 grep ^0beec7b /mnt/gitfs/commits      # resolve a short prefix
