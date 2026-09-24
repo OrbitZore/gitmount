@@ -2,7 +2,7 @@
 
 - RFC 编号: 0000
 - 标题: gitfs — read-only git-to-FUSE 文件系统
-- 状态: Accepted（2025-09-24 评审通过，决议见 §7）
+- 状态: Accepted（2025-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1）
 - 日期: 2025-09-24
 - 目标版本: 0.1.0
 
@@ -110,6 +110,13 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   这类 entry，与 VFS 保留名冲突，readdir/getattr **跳过**（getattr →
   `ENOENT`）并记警告日志，不透传给 VFS（fuse3 的 `.`/`..` 由内核生成，
   readdir 亦不得返回）。
+- **`refs/replace` 不生效（透传原始对象）**：gitfs 不遵循 replace refs，
+  语义等同 `git --no-replace-objects`——`/commit/<oid>` 的内容寻址承诺
+  （oid ↔ 对象一一对应）优先于替换机制；代价是在设置过 replace refs 的
+  仓库中输出与默认配置的 `git cat-file`/`git ls-tree` 不同（§4 测试
+  oracle 一律带 `--no-replace-objects`）。libgit2（截至 1.9）本就不实现
+  replace refs，透传即其默认行为；若未来版本引入遵循开关，构建时显式
+  关闭并加单测防回归。
 - **含 `/` 的 ref 名（如分支 `feature/foo`、tag `v1.0/rc`、远端跟踪
   `origin/feature/x`）按嵌套目录渲染**：
   readdir 按首分量分组；查找时逐级累积分量查询 refdb。git refdb 的 D/F
@@ -133,10 +140,18 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 - `st_size`：blob 的原始字节数（libgit2 直读，不做过滤）。
 - `st_mtime`/`st_ctime`：所属 commit 的 committer time；同一快照内全部一致，
   便于 rsync 类工具判断。
+- `st_atime`：与 `st_mtime` 同值（committer time），不随读取更新——只读
+  快照语义，避免逐次 stat 漂移干扰 rsync 类工具；主流发行版 `relatime`
+  挂载下内核本就不强制刷新 atime，用户无感知。
 - `st_nlink`：目录为 2，文件为 1（简化，不做精确统计）。
 - `st_uid`/`st_gid`：挂载进程的 uid/gid（fuse 默认行为）。
-- 合成文件（`commits`、`.gitfs-submodule`）的 `st_mtime` 为其生成时刻；
+- 合成文件的 `st_mtime`：`commits` 为其生成时刻；`.gitfs-submodule` 为所属
+  commit 的 committer time（内容确定性派生自树，避免逐次 stat 漂移）；
   `.gitfs.json` 为挂载时刻（快照语义，见 3.6）。
+- `.gitfs-submodule` 说明文件：mode `0644`，内容为两行 `key=value` 文本——
+  `url=<submodule url>` 与 `commit=<完整 oid>`（各以 LF 结尾）；url 取自该
+  commit 树根 `.gitmodules` 中对应 path 的条目，缺失或无对应条目时 `url=`
+  置空并记警告日志。
 
 ### 3.3 FUSE 操作实现
 
@@ -147,7 +162,7 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 | `open`/`release` | 仅校验 `O_RDONLY` 系标志（写标志 → `EROFS`，与内核对 ro 挂载的判定一致）；`commits` 首次 `open` 触发生成（见 3.5），且把当前缓冲版本**钉住于 `fi->fh`**——同一次 open 的所有 read 分片读自同一快照，refs 中途变化不影响（与 readdir 的目录流快照同构），`release` 时解除钉住；`.gitfs.json` 挂载期内不可变，无需钉住 |
 | `read` | 定位 blob（经 LRU 缓存），拷贝 `[offset, offset+size)` 越界截断；合成文件（`commits`、`.gitfs.json`、`.gitfs-submodule`）为整块只读缓冲，`commits` 读 open 时钉住的版本 |
 | `readlink` | symlink blob 内容；内容含嵌入 NUL 时**截断至首个 NUL**（内核 symlink 目标不可含 NUL；与 `git checkout` 的事实行为一致，显式同语义而非 `EIO`）；空 blob → 返回长度 0 的空目标；超过 PATH_MAX → `ENAMETOOLONG` |
-| `statfs` | 汇报 ODB/pack 大小为 `f_blocks`，块大小 4KiB；`f_bfree = f_bavail = 0`——只读卷惯例是 0 空闲，`df` 显示 100% 已用，向用户明确传达"无任何可写空间"（若报全量可用，`df` 会显示 0% 已用，易误导）；`f_files = f_ffree = 0`（精确 inode 计数需全量遍历，v0.1 不承诺，内核与 `df` 均容忍 0） |
+| `statfs` | 汇报本地 ODB 占用为 `f_blocks`（全部 packfile 字节 + loose 对象字节；alternates 指向的外部存储不计入，启用 alternates 时 verbose 日志提示），块大小 4KiB；`f_bfree = f_bavail = 0`——只读卷惯例是 0 空闲，`df` 显示 100% 已用，向用户明确传达"无任何可写空间"（若报全量可用，`df` 会显示 0% 已用，易误导）；`f_files = f_ffree = 0`（精确 inode 计数需全量遍历，v0.1 不承诺，内核与 `df` 均容忍 0） |
 | 其余（`mknod/mkdir/write/…`） | 返回 `EROFS` 或不注册（fuse3 只读挂载兜底） |
 
 错误映射：libgit2 错误码 → `ENOENT`（对象/分支不存在；oid 格式非法也统一
@@ -220,7 +235,7 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 {
   "format": 1,
   "repository": "/abs/path/to/repo.git",
-  "head": "refs/heads/main",      # detached 时为完整 oid
+  "head": "refs/heads/main",      # detached 时为完整 oid；unborn 时为 null
   "mounted_at": "2025-09-24T02:29:00Z",
   "cache_bytes": 67108864
 }
@@ -243,8 +258,9 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 选项:
   -o OPT       透传 fuse 选项（如 kernel_cache；allow_other 需
                /etc/fuse.conf 启用 user_allow_other）；基线键
-               （ro/nosuid/nodev/default_permissions）出现即报错退出 1，
-               防止安全基线被 CLI 稀释
+               （ro/nosuid/nodev/default_permissions）及其反向键
+               （rw/suid/dev）出现即报错退出 1，防止安全基线被 CLI
+               稀释或被反向键顶掉
   --cache-size <MiB>  blob LRU 缓存上限（默认 64）
   --foreground / -f  前台运行（默认守护进程化）
   --verbose / -v     输出路径解析与缓存命中日志
@@ -300,7 +316,8 @@ gitfs/
 │                              # 与 '..' entry 的非法 tree（绕过 fsck），
 │                              # 供 readdir 跳过断言使用；另含 detached
 │                              # HEAD 独有 commit（供 /commits 清单断言）
-│                              # 与 refs/remotes/origin/HEAD（供隐藏断言）
+││                              # 与 refs/remotes/origin/HEAD（供隐藏断言）、
+│                              # refs/replace/<oid>（供 replace 不生效断言）
 └── docs/
     └── filesystem-semantics.md  # 对用户承诺的语义（本文 3.x 的稳定化版本）
 ```
@@ -310,8 +327,10 @@ gitfs/
 - **测试策略**：
   - 单测：Catch2 v3；覆盖 path_map 状态机（含畸形路径、Unicode、超长 oid）、
     LRU 逐出、错误映射表；
-  - 集成：脚本生成 fixture 仓库 → 挂载到 tmpdir → 断言内容与 `git ls-tree`
-    /`git cat-file` 结果一致；含"挂载后新增 tag 立即可见"的一致性用例；
+  - 集成：脚本生成 fixture 仓库 → 挂载到 tmpdir → 断言内容与
+    `git --no-replace-objects ls-tree`/`git cat-file` 结果一致（oracle
+    与 gitfs 同为"replace 不生效"语义，见 3.1；fixture 含 replace ref
+    的反例断言）；含"挂载后新增 tag 立即可见"的一致性用例；
     边缘用例：`'.'`/`'..'` entry 在 readdir/getattr 被跳过且记警告、
     `refs/remotes/origin/HEAD` 在 `/remote` 不可见（访问 → `ENOENT`）、
     非 UTF-8 文件名按原始字节读回、含嵌入 NUL 的 symlink 截断至首个
@@ -349,3 +368,17 @@ gitfs/
 - **Q6 代码风格（维护者定）**：clang-format Google 风格。
 - **Q7 并发模型（维护者定）**：v0.1 单互斥串行化 libgit2；revwalk 长任务
   例外，分 chunk 让锁（见 3.4）；M3 基准不达标再引入按 oid 分片锁。
+
+### 7.1 补充决议（2026-09-24，评审后 review 跟进）
+
+- **Q8 `refs/replace`（已决）**：不遵循，透传原始对象（`git
+  --no-replace-objects` 同语义）；libgit2 截至本决议（1.9）无该机制、
+  无开关，未来版本引入则显式关闭并加回归单测（见 3.1、§4 测试 oracle）。
+- **Q9 元数据补全（已决）**：`st_atime` ≡ `st_mtime`（不随读取更新）；
+  `.gitfs-submodule` 定为 mode 0644、mtime = 所属 commit 的 committer
+  time（修订原"生成时刻"表述，避免逐次 stat 漂移）、内容为 `url=`/
+  `commit=` 两行（url 取自该 commit 树根 `.gitmodules`，缺失置空记警告）；
+  unborn HEAD 时 `.gitfs.json` 的 `head` 为 `null`（见 3.2、3.6）。
+- **Q10 statfs 口径与 CLI 黑名单（已决）**：`f_blocks` = 本地 ODB 占用
+  （pack + loose，不含 alternates）；`-o` 拒绝名单补入反向键
+  `rw/suid/dev`（见 3.3、3.7）。
