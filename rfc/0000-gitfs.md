@@ -2,7 +2,7 @@
 
 - RFC 编号: 0000
 - 标题: gitfs — read-only git-to-FUSE 文件系统
-- 状态： Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6、§7.7、§7.8、§7.9、§7.10、§7.11、§7.12、§7.13、§7.14（§7.11/§7.12/§7.13/§7.14 为定稿后 mount(8) 助手协议核验勘误））
+- 状态： Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6、§7.7、§7.8、§7.9、§7.10、§7.11、§7.12、§7.13、§7.14、§7.15、§7.16（§7.11–§7.15 为定稿后 mount(8) 助手协议核验勘误，§7.16 为定稿后收尾勘误））
 - 日期: 2026-09-24
 - 目标版本: 0.1.0
 
@@ -86,7 +86,11 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
                            分支路径（可含子路径），无歧义；
                            refs/remotes/<remote>/HEAD 符号引用**隐藏**
                            （枚举与查找均跳过，访问 → ENOENT）：peel 后
-                           仅是默认分支树的重复，符号语义也无法在目录树中表达
+                           仅是默认分支树的重复，符号语义也无法在目录树中
+                           表达；命名空间存在性以 refdb 为准——仅含该
+                           隐藏 HEAD 的命名空间仍渲染为**空目录**、
+                           不抑制（Q26c），跟踪 ref 出现后由实时枚举
+                           自动填充
 /HEAD                    → 当前 HEAD commit 的 root tree（unborn → ENOENT）
 /commit/<full-oid>       → 该 commit 的 root tree；oid 长度随仓库对象格式
                            （sha1=40、sha256=64），仅接受**小写**十六进制——
@@ -141,7 +145,12 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   readdir 按首分量分组；查找时逐级累积分量查询 refdb。git refdb 的 D/F
   规则保证一个 ref 不会是另一个的前缀，因此至多存在一个完整 ref 名前缀
   匹配，剩余分量即 tree 路径，无歧义；分组前缀节点与完整 ref 节点均为
-  目录，getattr 语义一致。
+  目录，getattr 语义一致——完整 ref 节点即其 root tree（元数据按
+  tree 目录口径，mtime = 所属 commit 的 committer time，见 3.2）；
+  **分组前缀节点**（`/branch/feature`、`/tag/v1.0`、`/remote/origin`
+  等命名空间目录）为合成节点，钉为 `S_IFDIR|0755`、`nlink=2`、
+  `st_mtime/ctime/atime` = 挂载时刻——与五个入口目录同口径（见
+  3.2/Q16d），非 tree 目录、不取 committer time（Q26b）。
 - **readdir 顺序全域钉住（Q16c）**：根目录、`branch/tag/remote`（含嵌套
   ref 的分组前缀目录）与 tree 目录一律按**路径分量原始字节（memcmp，无
   locale 参与）字典序**输出。tree 目录**重排**为字节字典序而非沿用
@@ -227,12 +236,19 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   open 起可见新版本"口径一致。`.gitfs-submodule` 为所属 commit 的
   committer time（内容确定性派生自树，避免逐次 stat 漂移）；
   `.gitfs.json` 为挂载时刻（快照语义，见 3.6）。
-- **合成入口的其余元数据（Q16d）**：`commits` 与 `.gitfs.json` 为
+- **合成入口的其余元数据（Q16d；Q26b/d 扩展）**：`commits` 与
+  `.gitfs.json` 为
   `S_IFREG | 0444`、`nlink=1`（写路径本就 `EROFS`，mode 与语义一致，
   `cp` 类工具按只读源处理）；根目录与 `/branch`、`/tag`、`/remote`、
   `/commit`、`/HEAD` 五个入口目录的 `st_mtime/ctime/atime` 为**挂载
   时刻**（`nlink=2` 按通用规则）——入口集合虽实时枚举，时间戳钉住
-  挂载快照不漂移，与 `.gitfs.json` 同口径。
+  挂载快照不漂移，与 `.gitfs.json` 同口径；**合成分组/命名空间目录**
+  （嵌套 ref 的前缀节点：`/branch/feature`、`/tag/v1.0`、
+  `/remote/origin` 等，见 3.1）同口径钉为 `S_IFDIR|0755`、`nlink=2`、
+  `st_mtime/ctime/atime` = 挂载时刻——非 tree 目录、不取 committer
+  time（Q26b）；**目录 `st_size` 恒为 4096**（根、入口、分组与 tree
+  目录统一，Q26d——与 `st_blksize` 同量级的目录尺寸惯例值，根 `/`
+  不再留未定口径）。
 - `.gitfs-submodule` 说明文件：mode `0644`，内容为两行 `key=value` 文本——
   `url=<submodule url>` 与 `commit=<完整 oid>`（各以 LF 结尾）；url 取自该
   commit 树根 `.gitmodules` 中对应 path 的条目，缺失或无对应条目时 `url=`
@@ -244,7 +260,7 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 |---|---|
 | `getattr` | 路径 → 对象（3.1），失败 `ENOENT`；`commits` 恒为纯缓存读（未生成时 `st_size=0`），**不**触发 revwalk 或指纹重算（见 3.5）；blob 的 `st_size` 经 header-only 读取（`git_odb_read_header`）获得，**不**触发 blob 全量解压（见 3.2/Q19b，与"不触发 revwalk"同构） |
 | `readdir` | 根：固定列表；`branch/tag/remote`：枚举 ref（含 `/` 的名字按目录分组）；`commit`：**恒为空**；tree：枚举 entries（含 `.gitfs-submodule` 合成项）——全部目录（含根）的输出顺序一律按分量原始字节字典序（见 3.1）。注册 `opendir/releasedir`：枚举列表快照挂于 `fi->fh`，保证单目录流内 offset 续读稳定（fuse3 要求），跨目录流实时反映 ref 变化 |
-| `open`/`release` | 仅校验 `O_RDONLY` 系标志（写标志 → `EROFS`，与内核对 ro 挂载的判定一致）；`commits` 首次 `open` 触发生成（见 3.5），且把当前缓冲版本**钉住于 `fi->fh`**——同一次 open 的所有 read 分片读自同一快照，refs 中途变化不影响（与 readdir 的目录流快照同构），`release` 时解除钉住；超限 blob（大于 `--blob-cache-size`）的 `open` 同构 open-pin：一次性 lookup（单互斥内）+ 全量解压（锁外执行，不阻塞全挂载其他请求），解压块钉住于 `fi->fh`、`release` 释放（见 3.5/Q18a）；`.gitfs.json` 挂载期内不可变，无需钉住 |
+| `open`/`release` | 仅校验 `O_RDONLY` 系标志（写标志 → `EROFS`，与内核对 ro 挂载的判定一致）；`commits` 首次 `open` 触发生成（见 3.5），且把当前缓冲版本**钉住于 `fi->fh`**——同一次 open 的所有 read 分片读自同一快照，refs 中途变化不影响（与 readdir 的目录流快照同构），`release` 时解除钉住；超限 blob（≥ `--blob-cache-size`，边界钉住见 3.5/Q26d）的 `open` 同构 open-pin：一次性 lookup（单互斥内）+ 全量解压（锁外执行，不阻塞全挂载其他请求），解压块钉住于 `fi->fh`、`release` 释放（见 3.5/Q18a）；`.gitfs.json` 挂载期内不可变，无需钉住 |
 | `read` | 定位 blob（可缓存者经 LRU 缓存；超限者读 open 时钉住的解压块，见 3.5），拷贝 `[offset, offset+size)` 越界截断；合成文件（`commits`、`.gitfs.json`、`.gitfs-submodule`）为整块只读缓冲，`commits` 读 open 时钉住的版本 |
 | `readlink` | symlink blob 内容；内容含嵌入 NUL 时**截断至首个 NUL**（内核 symlink 目标不可含 NUL；与 `git checkout` 的事实行为一致，显式同语义而非 `EIO`）；空 blob → 返回长度 0 的空目标；超过 PATH_MAX → `ENAMETOOLONG` |
 | `statfs` | 汇报本地 ODB 占用为 `f_blocks`（全部 packfile 字节 + loose 对象字节；alternates 指向的外部存储不计入，启用 alternates 时 verbose 日志提示），块大小 4KiB；`f_bfree = f_bavail = 0`——只读卷惯例是 0 空闲，`df` 显示 100% 已用，向用户明确传达"无任何可写空间"（若报全量可用，`df` 会显示 0% 已用，易误导）；`f_files = f_ffree = 0`（精确 inode 计数需全量遍历，v0.1 不承诺，内核与 `df` 均容忍 0） |
@@ -295,8 +311,12 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   默认 64 MiB，`--blob-cache-size` 可调（Q13 前名 `--cache-size`）。命中则
   `read` 为纯内存拷贝。
   **超限 blob 绕过缓存、open-pin 一次性解压（Q16e，Q17a 钉住解压
-  时机）**：单个 blob 大于当前 `--blob-cache-size` 时**不插入缓存、
-  也不触发既有条目逐出**（为单个超限对象清空整池只会引起缓存抖动）。
+  时机，Q26d 钉住边界）**：单个 blob **大于等于**（`>=`）当前
+  `--blob-cache-size` 时**不插入缓存、
+  也不触发既有条目逐出**（为单个超限对象清空整池只会引起缓存抖动；
+  边界刻意取 `>=` 而非 `>`——恰等于容量上限的 blob 若尝试入池，
+  会为容纳它逐出整池其余条目、自身又几乎占满全池，等效清空整池，
+  与绕过动机直接矛盾，Q26d）。
   超限判定所需的 blob 尺寸经 3.2 的 header-only 读取获得（Q19b），
   `open` 的准入判定不因取 size 触发全量解压。
   其解压时机钉住为**与 `commits` 同构的 open-pin**（见 3.3）：
@@ -461,8 +481,17 @@ mount.gitfs <repo> <mountpoint> [选项]            # 直连调用
 
 **mount(8) 实际转交行为（经 util-linux 2.42.3 libmount 源码并真实
 mount(8) exec 助手实测逐条核验，Q21 勘误 Q13(a)，Q22 勘误 Q21 的
-VFS 键滤除与 -N 转交口径）**：助手契约为
-`[-sfnv] [-N namespace] [-o options] <src> <dir>`，libmount exec
+VFS 键滤除与 -N 转交口径，Q26a 补契约末位 `-t` 子句）**：助手契约为
+`[-sfnv] [-N namespace] [-o options] [-t type.subtype] <src> <dir>`
+（man mount(8) EXTERNAL HELPERS 节明载末位 `-t` 子句：带点的 fstype
+`type.subtype` 由 libmount 以 `-t <type.subtype>` 整值转交——实测
+带点 fstype 的助手 argv 确为 `<src> <dir> -o rw -t <type.subtype>`，
+无点则恒不出现；`gitfs` 无点，经 mount(8) 的路径永不收到该子句，
+但契约核验口径为穷尽、缺此子句即非穷尽，故钉住处理：若经直连调用
+收到 `-t gitfs` 则接受并记 verbose 一条（冗余自指），**其余任何值**
+（含 `gitfs.<x>` 带点形态——用户 `mount -t gitfs.<x>` 时 libmount
+确会 exec `mount.gitfs` 并转交该值）为参数错误退出 1：fstype 错配，
+Q26a），libmount exec
 助手时转交契约短选项 `-s/-f/-n/-v`（`--fake` 转交为 `-f`）、
 `--namespace` 转交为 `-N <ns>`（与 `-n`/`-s` 同列容忍忽略，Q22b；
 `-s` 仅标志本身被容忍、不放松未知 `-o` 键拒绝，见下 -n/-s/-N
@@ -644,7 +673,7 @@ owner/group 不得写 noexec 存在性断言。直连调用时出现在 `-o`
                        （mount(8) 的 -v 映射至此）
   -n / -s / -N <ns>    mount(8) 转交的 no-mtab / sloppy / namespace 标志：
                        容忍并忽略（助手契约为 [-sfnv] [-N namespace]
-                       [-o options]，--namespace 时助手收到 -N <ns>，
+                       [-o options] [-t type.subtype]，--namespace 时助手收到 -N <ns>，
                        Q22b——本机 mount(8) 在 exec 前拒绝切 namespace，
                        该转交路径依 man 页契约文档化；-s 仅指标志本身
                        被容忍、不放松未知 -o 键拒绝——mount(8) 文档
@@ -759,6 +788,10 @@ gitfs/
     的反例断言）；含"挂载后新增 tag 立即可见"的一致性用例；
     边缘用例：`'.'`/`'..'` entry 在 readdir/getattr 被跳过且记警告、
     `refs/remotes/origin/HEAD` 在 `/remote` 不可见（访问 → `ENOENT`）、
+    嵌套 ref 分组/命名空间目录（`/branch/feature`、`/remote/origin`）
+    的元数据断言：mode 0755、nlink=2、mtime/ctime/atime = 挂载时刻
+    （与入口目录同口径、非 committer time），及根与 tree 目录
+    `st_size`=4096（Q26b/Q26d）、
     非 UTF-8 文件名按原始字节读回、含嵌入 NUL 的 symlink 截断至首个
     NUL、detached HEAD 独有 commit 出现在 `commits` 清单中、存在
     blob tag 时 `commits` 仍可成功生成且含全部 commit oid（非
@@ -770,7 +803,9 @@ gitfs/
     非 commit 目标入口：ref 指向 blob 的分支（update-ref 手工构造）
     → `/branch/<name>` `ENOENT`（与 `/tag` 同口径，见 3.1/Q17b）、
     超限 blob 直读（`--blob-cache-size=1` 挂载下读取大于容量的
-    blob，顺序分片整读、内容逐块与 `git cat-file` 一致且既有缓存
+    blob，另以一个恰等于容量上限（1 MiB = 1048576 字节）的 blob 断言
+    同走绕过路径——边界 `>=` 钉住，Q26d；顺序分片整读、内容逐块
+    与 `git cat-file` 一致且既有缓存
     条目不被逐出；open-pin 语义保证单次顺序读只解压一次——以
     **verbose 日志的解压计数 = 1** 直接断言（每次全量解压记一条
     `-v` 日志，见 3.5/Q18b；耗时比值断言只能抓 O(n²) 回归，计数
@@ -978,8 +1013,11 @@ gitfs/
   相反），`.gitfs-submodule` 合成项同名参与排序；§4 增顺序断言；
   (d) 合成入口元数据补全：`commits`/`.gitfs.json` 为 `S_IFREG|0444`、
   `nlink=1`；根与 `/branch`、`/tag`、`/remote`、`/commit`、`/HEAD`
-  入口目录的 mtime/ctime/atime = 挂载时刻（`nlink=2` 通用规则）；
-  (e) 超限 blob（单 blob > `--blob-cache-size`）绕过缓存直读：不插入、
+  入口目录的 mtime/ctime/atime = 挂载时刻（`nlink=2` 通用规则；该
+  口径经 §7.16(b)/Q26 扩展至合成分组/命名空间目录、§7.16(d) 补目录
+  st_size=4096）；
+  (e) 超限 blob（单 blob > `--blob-cache-size`，该边界经 §7.16(d)/Q26
+  钉为 `>=`）绕过缓存直读：不插入、
   不逐出既有条目；解压时机经 §7.7(a) 细化为 open-pin 一次性解压
   （原“逐 read 直取、内核页缓存兜底”表述不能消除重复解压，§3.5
   已相应修订）；blob 装载在 3.4 单互斥下串行执行，天然
@@ -1148,7 +1186,8 @@ gitfs/
   扩至五场景（增 `-o noatime` 与 fstab `user` 两用例，另以直连
   调用断言 remount/uid= 的专用错误）；
   (b) **`-N` 转交补全（小）**：mount(8) 助手契约语法实为
-  `[-sfnv] [-N namespace] [-o options]`，`--namespace` 时助手收到
+  `[-sfnv] [-N namespace] [-o options]`（该语法引用经 §7.16(a)/Q26
+  补全 man 页末位 `[-t type.subtype]` 子句），`--namespace` 时助手收到
   `-N <ns>`——§7.11(b) 的"只转交 -s/-f/-n/-v 与 -o"表述不完整，
   `-N` 原会按未知选项 exit 1；修订为与 `-n`/`-s` 同列容忍忽略
   （本沙箱无法实测 `-N` 转交——mount(8) 在 exec 前拒绝切
@@ -1283,3 +1322,45 @@ gitfs/
   名"规则覆盖（截=后键名即 ro/rw，落入既有无操作路径：ro 冗余、
   rw 记警告），原未注记——§3.7 规则(1) 与帮助文本、man 页
   OPTIONS 各一句点破，实现者无须为带值形态写特殊解析。
+
+### 7.16 定稿后收尾勘误（2026-09-24，定稿后 review round 6 跟进）
+
+- **Q26 助手契约 `-t` 子句、合成分组目录元数据、仅含 HEAD 的远端
+  命名空间与两处边界钉住（已决）**：round 6 复核发现四处收尾缺口，
+  均为一句级钉住、无结构调整：
+  (a) **助手契约 `-t` 子句（小）**：man mount(8) EXTERNAL HELPERS 节
+  的助手契约完整语法为 `[-sfnv] [-N namespace] [-o options]
+  [-t type.subtype] <src> <dir>`——末位 `-t` 子句（带点 fstype 由
+  libmount 以 `-t <type.subtype>` 转交；实测带点 fstype 的助手 argv
+  为 `<src> <dir> -o rw -t <type.subtype>`，无点则恒不出现）在
+  §3.7 的契约引用中缺位；`gitfs` 无点、经 mount(8) 的正常路径永不
+  触发，但 §3.7 自称对助手契约逐条核验穷尽，缺该子句即非穷尽。
+  修订：§3.7 契约引用与帮助文本内联契约补全语法；钉住处理——收到
+  `-t gitfs`（仅可能经直连调用出现）接受并记 verbose 一条（冗余
+  自指），其余任何值（含 `gitfs.<x>` 带点形态——用户
+  `mount -t gitfs.<x>` 时 libmount 确会 exec `mount.gitfs` 并转交该
+  值）为参数错误退出 1（fstype 错配）；§7.12(b) 的契约语法引用
+  补勘误链注记；man 页 INVOCATION 同步；
+  (b) **合成分组/命名空间目录元数据（小）**：嵌套 ref 的分组前缀
+  节点（`/branch/feature`、`/tag/v1.0`、`/remote/origin` 等）既非
+  五个入口目录（§3.2/Q16d 钉 mtime = 挂载时刻）也非 tree 目录
+  （committer time），§3.1 原"分组前缀节点与完整 ref 节点均为目录，
+  getattr 语义一致"未钉 mode/nlink/mtime，实现者可能自取 committer
+  time 或运行时时钟。钉住：`S_IFDIR|0755`、`nlink=2`、
+  `st_mtime/ctime/atime` = 挂载时刻（与入口目录同口径、非 tree 目录
+  不取 committer time）；§3.1/§3.2 钉住、§4 增一条断言、man 页
+  File metadata 同步；
+  (c) **仅含隐藏 HEAD 的远端命名空间（小）**：`refs/remotes/
+  <remote>/` 下仅有隐藏的 HEAD 符号引用时，`/remote/<remote>` 的
+  渲染（抑制 vs 空目录）原无口径。钉住：命名空间存在性以 refdb 为
+  准，仍渲染为**空目录**、不抑制——零特判，与"枚举 refs/remotes/
+  下实际存在的首层命名空间"的 refdb 直读语义一致，跟踪 ref 出现
+  后由实时枚举自动填充；§3.1 与 man 页 remote/ 条目各一句；
+  (d) **两处边界（微）**：① 目录 `st_size` 原无口径（含根 `/`）——
+  钉为 4096（全部目录统一：根、入口、分组与 tree 目录，与
+  `st_blksize` 同量级的惯例值）；② 超限判定原为严格 `>`——恰等于
+  `--blob-cache-size` 的 blob 会尝试入池、为容纳它逐出整池其余条目
+  而自身又几乎占满全池（等效清空整池），与"为单个超限对象清空整池
+  引起缓存抖动"的绕过动机矛盾——边界钉为 `>=`（恰等于上限的 blob
+  同走绕过路径）；§3.2/§3.3/§3.5 钉住、§4 超限用例补边界断言、
+  man 页 File metadata/--blob-cache-size 同步。

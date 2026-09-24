@@ -1,4 +1,4 @@
-.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q25)
+.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q26)
 .TH MOUNT.GITFS 8 "2026-09-24" "gitfs 0.1.0" "System Administration"
 .SH NAME
 mount.gitfs \- mount a git repository as a read\-only FUSE filesystem
@@ -51,7 +51,7 @@ three equivalent ways:
 .BI mount \-t \ gitfs \ repository \ mountpoint
 .BR mount (8)
 execs the helper per the helper contract
-.RI ( "[-sfnv] [-N namespace] [-o options] src dir" ):
+.RI ( "[-sfnv] [-N namespace] [-o options] [-t type.subtype] src dir" ):
 the short options
 .BR \-s ,
 .BR \-f ,
@@ -111,6 +111,28 @@ overridden by a command\-line
 is likewise resolved to a single forwarded key at the libmount layer,
 and whichever key arrives is a no\-op (rw is warned) \(em the mount is
 ro regardless, per the hardcoded baseline.
+The contract's final optional clause,
+.BI \-t \ type.subtype ,
+carries the full dotted filesystem type when one is used (verified
+empirically on util\-linux 2.42.3: a dotted type reaches the helper's
+argv as
+.RI "src dir \-o rw \-t type.subtype" ;
+a dotless type never produces a \-t argument at all).
+For the dotless
+.I gitfs
+type it never arrives via
+.BR mount (8) ,
+but it is handled for contract completeness: an arriving
+.BI \-t \ gitfs
+(only reachable on a direct invocation) is accepted and noted with one
+verbose line, while any other value \-\- including a dotted
+.I gitfs.<x>
+that
+.BR mount (8)
+does forward when invoked as
+.B mount \-t\ gitfs.<x>
+\-\- is a usage error, since the helper's filesystem type is
+.IR gitfs .
 .TP
 .I /etc/fstab
 entry
@@ -207,6 +229,13 @@ is hidden (access yields
 .BR ENOENT );
 a ref that does not peel to a commit is likewise not presented
 .RB ( ENOENT ).
+Namespace existence follows the ref database: a namespace whose only
+current content is that hidden
+.B HEAD
+still renders as an
+.B empty
+directory (not suppressed), and fills in as soon as any tracking ref
+appears.
 .TP
 .I HEAD/
 Snapshot of the current
@@ -398,7 +427,10 @@ unknown keys are rejected by libfuse (exit status 1).
 .TP
 .BI \-\-blob\-cache\-size \ MiB
 Blob LRU cache limit in MiB (default 64).
-A single blob larger than the limit bypasses the cache: it is looked up
+A single blob at or above the limit (size >= limit; the boundary is
+deliberately inclusive, so that a blob exactly equal to the limit
+cannot evict the whole pool just to be inserted) bypasses the cache:
+it is looked up
 and fully decompressed once at
 .BR open ,
 the decompressed block is pinned on the file handle for the lifetime
@@ -537,6 +569,17 @@ directories
 and
 .I HEAD/
 report the mount time as mtime/ctime/atime (nlink 2).
+The synthetic grouping directories (nested\-ref prefixes such as
+.IR branch/feature ,
+.IR tag/v1.0 ,
+and remote namespace directories such as
+.IR remote/origin )
+follow the same rule \(em 0755, nlink 2, mount time \(em not the
+committer time of any tree.
+All directories, the root included, report
+.B st_size
+4096, matching
+.BR st_blksize .
 .BR st_mtime ", " st_ctime ,
 and
 .B st_atime
