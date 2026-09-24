@@ -145,7 +145,7 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 | `100644` | `S_IFREG \| 0644` | 普通文件 |
 | `100755` | `S_IFREG \| 0755` | 可执行 |
 | `120000` | `S_IFLNK \| 0777` | 符号链接，`readlink` 返回 blob 内容 |
-| `160000` | `S_IFDIR \| 0755`（空目录）+ 说明文件 | 子模块：渲染为空目录，旁边放 `<name>.gitfs-submodule` 文本文件（`<name>` 即该子模块目录名，如 `deps/libfoo` → `deps/libfoo.gitfs-submodule`，与 man 页措辞一致；内容含 url 与 commit oid）；若树中已存在与该合成文件名相同的真实条目，真实条目优先、省略合成文件（记警告日志） |
+| `160000` | `S_IFDIR \| 0755`（空目录）+ 说明文件 | 子模块：渲染为空目录，旁边放 `<name>.gitfs-submodule` 文本文件（`<name>` 即该子模块目录名，如 `deps/libfoo` → `deps/libfoo.gitfs-submodule`；内容含 url 与 commit oid）；若树中已存在与该合成文件名相同的真实条目，真实条目优先、省略合成文件（记警告日志） |
 
 - `st_size`：blob 的原始字节数（libgit2 直读，不做过滤）。
 - `st_mtime`/`st_ctime`：所属 commit 的 committer time；同一快照内全部一致，
@@ -346,7 +346,7 @@ gitfs/
 │                              # 与 '..' entry 的非法 tree（绕过 fsck），
 │                              # 供 readdir 跳过断言使用；另含 detached
 │                              # HEAD 独有 commit（供 /commits 清单断言）
-││                              # 与 refs/remotes/origin/HEAD（供隐藏断言）、
+                              # 与 refs/remotes/origin/HEAD（供隐藏断言）、
 │                              # refs/replace/<oid>（供 replace 不生效断言）
 └── docs/
     ├── filesystem-semantics.md  # 对用户承诺的语义（本文 3.x 的稳定化版本；
