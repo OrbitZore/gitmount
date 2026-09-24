@@ -2,8 +2,8 @@
 
 - RFC 编号: 0000
 - 标题: gitfs — read-only git-to-FUSE 文件系统
-- 状态: Accepted（2025-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1）
-- 日期: 2025-09-24
+- 状态: Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2）
+- 日期: 2026-09-24
 - 目标版本: 0.1.0
 
 ## 0. 摘要
@@ -126,6 +126,16 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 - `/branch`、`/tag`、`/remote` 的 readdir 实时反映仓库外部更新（`/commit`
   恒为空，见上），新 commit、新 tag 无需重新挂载即可见；已解析的旧对象只要
   仍存在于 ODB 中就继续可访问（配合 3.5 的缓存策略）。
+- **空仓库（无任何 refs 且 unborn HEAD）**：挂载照常成功——`/branch`、
+  `/tag`、`/remote` 为空目录，`/HEAD` 访问 → `ENOENT`，`commits` 为空
+  清单（`st_size=0`，open 生成空缓冲），`.gitfs.json` 的 `head` 为
+  `null`（见 3.6）。
+- **挂载期间的外部 `git gc`/`git prune`**：gitfs 不加锁、不阻止任何外部
+  git 操作。若 gc 重写 pack 或 prune 删除了后续请求仍需要的对象，该请求
+  瞬时返回 `ENOENT`（对象消失）或 `EIO`（pack 中途失效），gc 结束后即
+  恢复；gitfs 不承诺挂载期内对象集不变。运维建议：挂载期间禁用自动
+  gc（`git config gc.auto 0`）或接受上述瞬态错误（README 与
+  filesystem-semantics.md 中声明，见 §4）。
 
 ### 3.2 权限与元数据映射
 
@@ -135,7 +145,7 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 | `100644` | `S_IFREG \| 0644` | 普通文件 |
 | `100755` | `S_IFREG \| 0755` | 可执行 |
 | `120000` | `S_IFLNK \| 0777` | 符号链接，`readlink` 返回 blob 内容 |
-| `160000` | `S_IFDIR \| 0755`（空目录）+ 说明文件 | 子模块：渲染为空目录，旁边放同名 `.gitfs-submodule` 文本文件（内容含 url 与 commit oid）；若树中存在同名真实条目，真实条目优先、省略合成文件（记警告日志） |
+| `160000` | `S_IFDIR \| 0755`（空目录）+ 说明文件 | 子模块：渲染为空目录，旁边放 `<name>.gitfs-submodule` 文本文件（`<name>` 即该子模块目录名，如 `deps/libfoo` → `deps/libfoo.gitfs-submodule`，与 man 页措辞一致；内容含 url 与 commit oid）；若树中已存在与该合成文件名相同的真实条目，真实条目优先、省略合成文件（记警告日志） |
 
 - `st_size`：blob 的原始字节数（libgit2 直读，不做过滤）。
 - `st_mtime`/`st_ctime`：所属 commit 的 committer time；同一快照内全部一致，
@@ -229,8 +239,9 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   真实值。单次 open 经 `fi->fh` 钉住缓冲版本直至 release（见 3.3），跨
   open 语义为"下一次 open 起可见新版本"；并发首次 open 的 single-flight
   串行化见 3.4。挂载后后台线程预生成留作后续
-  可选优化（如 `--prewarm`），v0.1 不做。110 万 commit ≈ 45MB 文本，
-  内存与 grep 均可接受。
+  可选优化（如 `--prewarm`），v0.1 不做。110 万 commit ≈ 45MB 文本
+  （sha1 口径：每行 41B 含 LF；sha256 仓库为 65B/行 ≈ 74MB），内存与
+  grep 均可接受。
 - FUSE 侧默认 **不开启 kernel_cache**：显式置 `attr_timeout=0、
   entry_timeout=0`（注意 fuse3 默认值均为 1s，不显式置 0 则有 1 秒陈旧窗口）：
   ref 是可变的（分支可能被删），正确性优先；提供 `-o kernel_cache` 透传给
@@ -252,7 +263,7 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   "format": 1,
   "repository": "/abs/path/to/repo.git",
   "head": "refs/heads/main",      # detached 时为完整 oid；unborn 时为 null
-  "mounted_at": "2025-09-24T02:29:00Z",
+  "mounted_at": "2026-09-24T02:29:00Z",
   "cache_bytes": 67108864
 }
 ```
@@ -277,7 +288,9 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
                （ro/nosuid/nodev/default_permissions）及其反向键
                （rw/suid/dev）出现即报错退出 1，防止安全基线被 CLI
                稀释或被反向键顶掉
-  --cache-size <MiB>  blob LRU 缓存上限（默认 64）
+  --cache-size <MiB>  blob LRU 缓存上限（默认 64）；值为正整数（十进制
+                      MiB）——0、负数、非数字或溢出 size_t → 参数错误
+                      （退出码 1）；不设人为上限，受可用内存约束
   --foreground / -f  前台运行（默认守护进程化）
   --verbose / -v     输出路径解析与缓存命中日志
   --version / --help
@@ -304,7 +317,8 @@ gitfs/
 ├── CMakeLists.txt            # >= 3.16，C++17，-Wall -Wextra -Wpedantic -Werror(CI)
 ├── LICENSE                   # GPL-3.0-or-later（SPDX 标注同左）
 ├── README.md                 # 快速开始、语义说明（含 /commits 首次 open
-│                             # 的停顿语义，见 3.4）、FAQ
+│                             # 的停顿语义，见 3.4；挂载期间禁 gc 的运维
+│                             # 提示，见 3.1）、FAQ
 ├── CONTRIBUTING.md           # 分支/提交规范、如何跑测试
 ├── CODE_OF_CONDUCT.md
 ├── SECURITY.md               # 报告漏洞渠道
@@ -335,7 +349,8 @@ gitfs/
 ││                              # 与 refs/remotes/origin/HEAD（供隐藏断言）、
 │                              # refs/replace/<oid>（供 replace 不生效断言）
 └── docs/
-    ├── filesystem-semantics.md  # 对用户承诺的语义（本文 3.x 的稳定化版本）
+    ├── filesystem-semantics.md  # 对用户承诺的语义（本文 3.x 的稳定化版本；
+    │                          # 必含"gc/prune 并发"与"空仓库"两节，见 3.1）
     └── gitfs.1                  # man 手册（roff；CMake install 到 $(mandir)）
 ```
 
@@ -372,7 +387,7 @@ gitfs/
 3. **M3**：blob LRU、性能基准、集成测试矩阵、CI 完整化。
 4. **M4**：文档定稿、0.1.0 发布（首个 SemVer tag）。
 
-## 7. 评审决议（2025-09-24）
+## 7. 评审决议（2026-09-24）
 
 - **Q1/Q2 `/commit` 语义（已决）**：`/commit/<full-oid>` 仅接受完整 oid
   （长度随对象格式：sha1=40、sha256=64），
@@ -404,3 +419,17 @@ gitfs/
   漏掉大目录 tree，拖垮元数据密集负载）；blob per-type **写死 0**，
   保证解压后 blob 仅存于自家 LRU、不双层缓存双记账；总预算维持默认
   256MiB，与 `--cache-size` 独立记账（见 3.5）。
+
+### 7.2 勘误与语义补全（2026-09-24，review round 2 跟进）
+
+- **Q12 文档一致性与运维语义（已决）**：(a) 时间线勘误——RFC 头部与 §7
+  的日期由 2025-09-24 统一为 **2026-09-24**（与仓库提交、§7.1 及 §3.6
+  示例时间戳一致），man 页头注释同步更新至 Q1-Q12；(b) §3.5 清单体
+  积估算限定口径——45MB 仅按 sha1（41B/行），sha256 为 65B/行
+  ≈ 74MB；(c) §3.2 子模块说明文件命名明确为 `<name>.gitfs-submodule`；
+  (d) 显式声明挂载期间外部 `git gc`/`git prune` 语义——对象被删 →
+  瞬时 `ENOENT`/`EIO`，建议挂载期间禁 gc 或接受瞬态错误（见 3.1）；
+  (e) 显式声明空仓库行为——挂载成功、入口为空（见 3.1）；(f)
+  `--cache-size` 校验规则定案：正整数，0/负数/非法 → 退出码 1，无
+  人为上限（见 3.7）。README 与 filesystem-semantics.md 大纲补
+  "gc 并发""空仓库"内容（见 §4）。

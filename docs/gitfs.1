@@ -1,4 +1,4 @@
-.\" gitfs(1) manual page — semantics per rfc/0000-gitfs.md (Q1-Q10)
+.\" gitfs(1) manual page — semantics per rfc/0000-gitfs.md (Q1-Q12)
 .TH GITFS 1 "2026-09-24" "gitfs 0.1.0" "User Commands"
 .SH NAME
 gitfs \- mount a git repository as a read\-only FUSE filesystem
@@ -137,6 +137,9 @@ is a usage error.
 .TP
 .BI \-\-cache\-size \ MiB
 Blob LRU cache limit in MiB (default 64).
+The value must be a positive integer; 0, negative, or unparseable
+values are usage errors (exit status 1); there is no artificial upper
+cap (bounded only by available memory).
 Tree and commit metadata is served from a separate internal cache
 (libgit2 object cache, 256 MiB by default) and is not governed by
 this option.
@@ -213,6 +216,42 @@ Kernel attribute and entry cache timeouts default to 0 to avoid stale
 entries; users who know the repository will not change during a mount
 may opt in with
 .BR \-o\ kernel_cache .
+.SS Empty repositories
+A repository with no refs and an unborn
+.B HEAD
+mounts successfully:
+.IR branch/ ,
+.IR tag/ ,
+and
+.I remote/
+are empty directories,
+.I HEAD/
+yields
+.BR ENOENT ,
+.I commits
+is an empty file (size 0), and
+.I .gitfs.json
+reports
+.B head
+as null.
+.SS Concurrent repository maintenance
+.B gitfs
+neither locks the repository nor blocks external git commands.
+If
+.B "git gc"
+or
+.B "git prune"
+rewrites packs or removes objects that a pending request still needs,
+that request transiently fails with
+.B ENOENT
+(object gone) or
+.B EIO
+(pack invalidated mid\-read), and recovers once gc finishes;
+.B gitfs
+does not promise a stable object set for the lifetime of a mount.
+When transient errors are unacceptable, disable automatic gc for the
+duration of the mount
+.RB ( git\ config\ gc.auto\ 0 ).
 .SH EXIT STATUS
 .TP
 .B 0
