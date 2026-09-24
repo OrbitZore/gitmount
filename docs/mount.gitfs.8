@@ -1,4 +1,4 @@
-.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q21)
+.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q22)
 .TH MOUNT.GITFS 8 "2026-09-24" "gitfs 0.1.0" "System Administration"
 .SH NAME
 mount.gitfs \- mount a git repository as a read\-only FUSE filesystem
@@ -50,16 +50,26 @@ three equivalent ways:
 .TP
 .BI mount \-t \ gitfs \ repository \ mountpoint
 .BR mount (8)
-execs the helper with the helper\-contract short options
+execs the helper per the helper contract
+.RI ( "[-sfnv] [-N namespace] [-o options] src dir" ):
+the short options
 .BR \-s ,
 .BR \-f ,
 .BR \-n ,
 and
 .B \-v
-plus the
+(plus
+.BI \-N \ ns
+when
+.B \-\-namespace
+is used) and the
 .B \-o
-options string (see OPTIONS for the mapping; behavior verified
-against util\-linux 2.42.3 libmount).
+options string, with the options placed after the two positional
+arguments (a measured argv is
+.RI "src dir \-f \-o rw" ),
+so the helper's parser tolerates option permutation (GNU getopt
+style); behavior verified against util\-linux 2.42.3 libmount,
+including real exec'd\-helper argv capture.
 .B \-\-fake
 is forwarded to the helper as
 .BR \-f ;
@@ -94,9 +104,19 @@ entry
 .fi
 .RE
 .IP
-Generic VFS options (exec, auto, user, async, ...) are translated by
+Only a fixed subset of generic VFS options is filtered by
 .BR mount (8)
-itself and never reach the helper.
+before the helper is exec'd (auto, noauto, comment=, x\-*, loop,
+offset=, sizelimit=, defaults, and the propagation options); every
+other VFS option reaches the helper verbatim in the
+.B \-o
+string \(em the atime family (noatime, relatime, strictatime,
+lazytime, diratime), the sync family (sync, async, dirsync), the
+exec family (exec, noexec), the user family (user, users, owner,
+group \(em which also implicitly adds noexec, nosuid, nodev),
+_netdev, nofail, remount, and uid=/gid=/umask= \(em and is
+classified as described under
+.BR OPTIONS .
 With util\-linux >= 2.35 a command\-line
 .B \-o
 augments the fstab options (the merged string may list the same key
@@ -255,6 +275,28 @@ so rejecting it would break the plain
 .B "mount \-t gitfs repo dir"
 invocation (ro stays hardcoded and cannot be diluted; ntfs\-3g uses
 the same convention).
+Generic VFS options that libmount forwards verbatim in the \-o
+string (only the fixed subset named above is filtered before the
+helper is exec'd) are likewise accepted and ignored, each noted by
+one verbose line: the atime family (noatime, relatime,
+strictatime, lazytime, diratime), the sync family (sync, async,
+dirsync), the exec family (exec, noexec), the user family (user,
+users, owner, group), _netdev, and nofail \(em all harmless under
+the hardcoded
+.B ro
+and the atime≡mtime semantics, so common habits such as
+.B "mount \-t gitfs \-o noatime repo dir"
+and fstab entries with
+.B user
+(for non\-root mounting) or
+.B "nofail / _netdev"
+(common at boot) keep working (rw/ntfs\-3g precedent).
+.B remount
+and
+.BI uid= / gid= / umask=
+are usage errors with dedicated error messages (v0.1 has no remount
+or ownership\-mapping semantics; silently ignoring them would hide
+the user's intent).
 The remaining reverse keys
 .RB ( suid ,
 .B dev )
@@ -350,9 +392,15 @@ open\-pin decompressions and cache\-miss LRU loads; a plain
 produces no decompression lines since blob sizes are read from ODB
 headers only).
 .TP
-.BR \-n ", " \-s
-Accepted and ignored (no\-mtab / sloppy flags forwarded by
-.BR mount (8)).
+.BR \-n ", " \-s ", " "\-N ns"
+Accepted and ignored (no\-mtab / sloppy / namespace flags forwarded by
+.BR mount (8):
+.B \-\-namespace
+reaches the helper as
+.BI \-N \ ns
+per the helper contract, although
+.BR mount (8)
+currently refuses to switch namespaces before exec'ing a helper).
 .TP
 .B \-r ", " \-w
 Never received from
@@ -562,9 +610,18 @@ duration of the mount
 .SH EXIT STATUS
 .TP
 .B 0
-Normal unmount, or a successful fake run of
+Successful mount (the process exits 0 after daemonizing; this is the
+exit status
+.BR mount (8)
+propagates for a helper invocation), a graceful foreground
+termination (SIGINT/SIGTERM), or a successful fake run of
 .B \-f
 (arguments validated, nothing mounted).
+Unmounting is performed by
+.BR umount (8)
+or
+.BR fusermount3 (1)
+and does not involve this program.
 .TP
 .B 1
 Usage error (bad arguments, forbidden
@@ -579,6 +636,7 @@ Mount failure.
 .SH EXAMPLES
 .nf
 mount \-t gitfs ~/src/myproj /mnt/gitfs
+mount \-t gitfs \-o noatime ~/src/myproj /mnt/gitfs   # VFS no\-op keys accepted
 mount \-\-fake \-t gitfs ~/src/myproj /mnt/gitfs   # forwarded as \-f: validate only
 ls /mnt/gitfs/branch/main/src
 grep ^0beec7b /mnt/gitfs/commits      # resolve a short prefix
@@ -590,6 +648,7 @@ fusermount3 \-u /mnt/gitfs            # or: umount /mnt/gitfs
 /etc/fstab:
 .nf
 /path/to/repo  /mnt/gitfs  gitfs  ro,blob\-cache\-size=128,tree\-cache\-size=512  0  0
+/path/to/repo  /mnt/gitfs  gitfs  ro,user,noatime  0  0    # non\-root mountable
 .fi
 .SH SECURITY
 The kernel enforces ownership and permission checks

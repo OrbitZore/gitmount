@@ -2,7 +2,7 @@
 
 - RFC 编号: 0000
 - 标题: gitfs — read-only git-to-FUSE 文件系统
-- 状态: Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6、§7.7、§7.8、§7.9、§7.10、§7.11（§7.11 为定稿后 mount(8) 助手协议核验勘误））
+- 状态: Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6、§7.7、§7.8、§7.9、§7.10、§7.11、§7.12（§7.11/§7.12 为定稿后 mount(8) 助手协议核验勘误））
 - 日期: 2026-09-24
 - 目标版本: 0.1.0
 
@@ -459,23 +459,44 @@ mount <mountpoint>                                # /etc/fstab 条目触发
 mount.gitfs <repo> <mountpoint> [选项]            # 直连调用
 ```
 
-**mount(8) 实际转交行为（经 util-linux 2.42.3 libmount 源码逐条核验，
-Q21 勘误 Q13(a)）**：libmount exec 助手时只转交助手契约短选项
-`-s/-f/-n/-v`（`--fake` 转交为 `-f`）与 `-o` 选项串；`-r`/`-w` **从不
-以标志形式转交**，而是由 libmount 并入 `-o` 串（`-r` → 追加 `ro`、
-`-w` → 追加 `rw`）；且对未显式只读（`-r` 或 `-o ro`）的调用，libmount
-**无条件在 `-o` 串中预置 `rw`**——裸调用 `mount -t gitfs <repo> <dir>`
-实际到达助手的是 `-o rw`，故 `rw` 必须被接受（见下选项说明），否则
-§0/本节首推的默认调用形态必然 exit 1。fstab 条目
+**mount(8) 实际转交行为（经 util-linux 2.42.3 libmount 源码并真实
+mount(8) exec 助手实测逐条核验，Q21 勘误 Q13(a)，Q22 勘误 Q21 的
+VFS 键滤除与 -N 转交口径）**：助手契约为
+`[-sfnv] [-N namespace] [-o options] <src> <dir>`，libmount exec
+助手时转交契约短选项 `-s/-f/-n/-v`（`--fake` 转交为 `-f`）、
+`--namespace` 转交为 `-N <ns>`（与 `-n`/`-s` 同列容忍忽略，Q22b）
+与 `-o` 选项串；`-r`/`-w` **从不以标志形式转交**，而是由 libmount
+并入 `-o` 串（`-r` → 追加 `ro`、`-w` → 追加 `rw`）；且对未显式
+只读（`-r` 或 `-o ro`）的调用，libmount **无条件在 `-o` 串中预置
+`rw`**——裸调用 `mount -t gitfs <repo> <dir>` 实际到达助手的 argv
+为 `<repo> <dir> -o rw`，且选项恒出现在位置参数**之后**（实测如
+`<src> <dir> -f -o rw`），参数解析须容忍选项后置（GNU getopt 式
+置换，Q22c），否则主路径直接破；`rw` 必须被接受（见下选项说明），
+否则 §0/本节首推的默认调用形态必然 exit 1。fstab 条目
 `/path/repo  /mnt/gitfs  gitfs  ro,blob-cache-size=128  0  0` 同样经由
 助手挂载；util-linux ≥2.35 还允许 CLI `-o` 在 fstab 选项之上增改
-（合并串中同一键可出现两次），相应覆盖语义见下"后者胜"规则。通用
-VFS 键（exec/auto/user/async 等）由 mount(8) 在调用助手前翻译为挂载
-syscall 标志、不会到达 gitfs；直连调用时出现在 `-o` 中的其余键则
-透传 libfuse（见下）。
+（合并串中同一键可出现两次），相应覆盖语义见下"后者胜"规则。
+**`-o` 串中 VFS 键的实际到达口径（Q22a，勘误 Q21 版正文的断言——
+"通用 VFS 键由 mount(8) 翻译为挂载 syscall 标志、不会到达 gitfs"
+系事实错误）**：libmount 仅滤除固定子集（auto/noauto/comment=/
+x-*/loop/offset=/sizelimit=/defaults 及传播键），其余 VFS 键原样
+到达——noatime/relatime/strictatime/lazytime/diratime、sync/async/
+dirsync、exec/noexec、user/users/owner/group（且隐式附带
+noexec,nosuid,nodev）、_netdev、nofail、remount、uid=/gid=/umask=
+均在列。到达的无关 VFS 键按 `rw`/ntfs-3g 先例**接受并忽略**
+（verbose 记一条）：noatime 族/sync 族/exec 族/user 族/_netdev/
+nofail——ro、atime≡mtime 语义下均无害，`mount -t gitfs -o
+noatime repo dir` 这类常见习惯、fstab 的 `user`（非 root 挂载）
+与 boot 常见的 `nofail`/`_netdev` 均不因未知键失败；`suid`/`dev`
+维持报错退出 1（实测确实到达，规范可测）；`remount`、`uid=`/
+`gid=`/`umask=` 显式定口径为报错退出 1 并给专用错误文案（v0.1
+无 remount/属主映射语义，静默忽略会掩盖用户意图）。直连调用时
+出现在 `-o` 中的其余键则透传 libfuse（见下）。
 
 ```
 用法: mount.gitfs [选项] <repository> <mountpoint>
+      （选项可出现在位置参数之后——mount(8) exec 助手实测 argv 为
+        <repo> <dir> -f -o rw，解析须容忍 GNU getopt 式选项置换，Q22c）
 
 选项:
   -o OPT[,OPT…]       键值/开关形态。gitfs 自有键 blob-cache-size=<MiB>、
@@ -489,9 +510,22 @@ syscall 标志、不会到达 gitfs；直连调用时出现在 `-o` 中的其余
                        冗余无操作；`rw` 同样接受为无操作并记 stderr
                        警告——libmount 对非只读调用无条件预置该键
                        （见上，Q21a），ro 为硬编码基线、安全不被稀释
-                       （ntfs-3g 同先例）；反向键 suid/dev 报错退出 1，
+                       （ntfs-3g 同先例）；到达 `-o` 串的无关 VFS 键
+                       （noatime/relatime/strictatime/lazytime/
+                       diratime、sync/async/dirsync、exec/noexec、
+                       user/users/owner/group、_netdev、nofail，Q22a）
+                       一律接受并忽略、verbose 记一条——libmount 仅
+                       滤除固定子集（auto/noauto/comment=/x-*/loop/
+                       offset=/sizelimit=/defaults 及传播键），这些键
+                       实测原样到达，ro、atime≡mtime 语义下忽略无
+                       害（`-o noatime` 习惯用法与 fstab `user`/
+                       `nofail`/`_netdev` 场景不因未知键失败）；
+                       反向键 suid/dev 报错退出 1，
                        防安全基线被 CLI 稀释或顶掉
-                       （Q10/Q13/Q14/Q21）；`fsname=` 允许透传覆盖基线
+                       （Q10/Q13/Q14/Q21）；remount 与 uid=/gid=/
+                       umask= 报错退出 1 并给专用错误文案（v0.1 无
+                       remount/属主映射语义，静默忽略会掩盖用户意图，
+                       Q22a）；`fsname=` 允许透传覆盖基线
                        （cosmetic），`subtype=` 覆盖基线 → 参数错误
                        退出 1（基线保护，Q15a）；其余键原样透传 libfuse
                        选项解析器（如 kernel_cache；allow_other 需
@@ -513,8 +547,12 @@ syscall 标志、不会到达 gitfs；直连调用时出现在 `-o` 中的其余
                        事件（每次解压一条，即解压计数：超限 open-pin
                        与缓存 miss 装载各一条，见 3.5）
                        （mount(8) 的 -v 映射至此）
-  -n / -s              mount(8) 转交的 no-mtab / sloppy 标志：容忍并忽略
-                       （-r/-w 从不以标志形式转交——libmount 并入 -o
+  -n / -s / -N <ns>    mount(8) 转交的 no-mtab / sloppy / namespace 标志：
+                       容忍并忽略（助手契约为 [-sfnv] [-N namespace]
+                       [-o options]，--namespace 时助手收到 -N <ns>，
+                       Q22b——本机 mount(8) 在 exec 前拒绝切 namespace，
+                       该转交路径依 man 页契约文档化；
+                       -r/-w 从不以标志形式转交——libmount 并入 -o
                        串为 ro/rw，见上；直连调用显式传 -r/-w 按未知
                        选项处理 → 参数错误退出 1）
   --version / --help
@@ -529,8 +567,12 @@ syscall 标志、不会到达 gitfs；直连调用时出现在 `-o` 中的其余
   -t gitfs` 的匹配依赖它。
 - 卸载：`umount <mountpoint>`（或 `fusermount3 -u`）；守护进程收到
   `SIGINT`/`SIGTERM` 亦优雅退出（见 3.4）。
-- 退出码：0 正常卸载，或 `-f` fake 校验通过后不挂载退出；1 参数错误；
-  2 仓库不可读/不是 git 仓库；3 挂载失败。
+- 退出码：0 挂载成功（守护进程化后父进程退出）或前台模式优雅终止
+  （SIGINT/SIGTERM，见 3.4），`-f` fake 校验通过后不挂载退出亦为
+  0——mount(8) 助手形态下 mount(8) 传播的 exit 0 语义即"挂载成功"，
+  卸载由 umount(8)/fusermount3 完成、不经本程序（Q22d 勘误原
+  "0 正常卸载"措辞）；1 参数错误；2 仓库不可读/不是 git 仓库；
+  3 挂载失败。
 
 ### 3.8 安全注意事项
 
@@ -638,16 +680,24 @@ gitfs/
     断言：大容量 `--blob-cache-size` 挂载下首次读大可缓存 blob 期
     间并发的根 readdir 不被长时间阻塞（自管 runner、宽松阈值，见
     3.5/Q19a）；
-    **mount(8) exec 路径三场景（Q21）**：经真实 `mount -t gitfs`（需
-    util-linux ≥2.35 与特权环境，CI 无特权时 skip 标记）走 libmount
-    exec_helper 全链路：(1) 默认调用 `mount -t gitfs <repo> <dir>`
+    **mount(8) exec 路径五场景（Q21，Q22 扩至五）**：经真实
+    `mount -t gitfs`（需 util-linux ≥2.35 与特权环境，CI 无特权时
+    skip 标记）走 libmount exec_helper 全链路：(1) 默认调用
+    `mount -t gitfs <repo> <dir>`
     （不带 -o ro）——libmount 预置的 `-o rw` 到达助手，断言被接受
     （stderr 记警告）且挂载成功、卸载干净；(2) `mount --fake -t gitfs
     <repo> <dir>`——断言转交的 `-f` 走 fake 语义：参数与选项完整
     校验通过、mountpoint 未被挂载、退出码 0；(3) fstab 条目
     `blob-cache-size=128` + CLI `-o blob-cache-size=256` 合并调用——
     断言自有键后者胜（挂载后读 `.gitfs.json` 的 `cache.blob_bytes`
-    = 256×1024²）；另增 st_blocks 断言：`du`（512B 块口径）对普通
+    = 256×1024²）；(4) `mount -t gitfs -o noatime <repo> <dir>`——
+    断言到达的 noatime 被接受并忽略（verbose 记一条）且挂载成功、
+    卸载干净（Q22a）；(5) fstab 含 `user` 的条目以非 root 用户
+    `mount <dir>` 触发——断言 `user` 及其隐式附带的
+    noexec,nosuid,nodev 到达后均被接受（noexec 忽略、nosuid/
+    nodev 冗余无操作）且挂载成功（Q22a）；另以直连调用断言
+    `-o remount` 与 `-o uid=1000` 退出 1 且错误文案专用（Q22a）；
+    另增 st_blocks 断言：`du`（512B 块口径）对普通
     文件与合成文件报块数 = ceil(st_size/512)，不再恒为 0
     （见 3.2/Q21d）；
   - CI 上 `/dev/fuse` 不可用时集成测试自动 skip（标记），在自管 runner 跑全量。
@@ -698,7 +748,9 @@ gitfs/
   （pack + loose，不含 alternates）；`-o` 拒绝名单补入反向键
   `rw/suid/dev`（见 3.3、3.7）（`rw` 经 §7.11(a)/Q21 勘误改为接受为
   无操作并记 stderr 警告——libmount 对助手调用无条件预置该键；现行
-  拒绝名单为 `suid/dev`）。
+  拒绝名单为 `suid/dev`；到达 `-o` 串的无关 VFS 键（noatime 族等）
+  经 §7.12(a)/Q22 定为接受并忽略、remount/uid= 等无对应语义的键
+  退出 1）。
 - **Q11 libgit2 缓存调参与防双层缓存（已决）**：tree/commit 依赖
   libgit2 内置缓存，但显式抬 per-type 上限（tree 1MiB——默认 4KiB 会
   漏掉大目录 tree，拖垮元数据密集负载）；blob per-type **写死 0**，
@@ -727,7 +779,8 @@ gitfs/
   三种调用等价；mount(8) 转交标志映射定案（`-r` 接受、`-w` 报错退出 1、
   `-n`/`-s` 容忍忽略、`-v` 映射 verbose，`--fake` 由 mount(8) 自身消化）
   ——该转交口径基于错误前提，经 §7.11(a)(b)/Q21 全面勘误：libmount
-  实际仅转交 `-s/-f/-n/-v` 与 `-o` 串（`--fake` → `-f`），`-r`/`-w`
+  实际仅转交 `-s/-f/-n/-v` 与 `-o` 串（`--fake` → `-f`；`-N <ns>`
+  转交经 §7.12(b)/Q22 补入容忍忽略），`-r`/`-w`
   并入 `-o` 串为 `ro`/`rw` 且非只读调用无条件预置 `rw`，故 `rw` 接受
   并记警告、`-f` 实现为 fake、前台仅 `--foreground`；
   `-o` 增加键值形态，自有键 `blob-cache-size`/`tree-cache-size`（连字符/
@@ -937,3 +990,44 @@ gitfs/
   且挂载成功）、`mount --fake` 转交 `-f`（校验通过、不挂载、退出
   0）、fstab+CLI 同键覆盖（后者胜，以 `.gitfs.json` 的 cache 字段
   断言生效值），另增 st_blocks 的 du 断言。
+
+### 7.12 VFS 键到达口径、-N 转交、选项后置与退出码措辞（2026-09-24，定稿后 review round 2 跟进）
+
+- **Q22 到达的 VFS 键集、-N 短选项、选项后置解析与退出码 0 措辞
+  （已决）**：以本机 util-linux 2.42.3 真实 mount(8) exec 助手实测
+  （安装临时 `/sbin/mount.gitfs-xyz` 助手捕获 argv）核验后修订
+  四项：
+  (a) **VFS 键到达口径勘误（中高）**：§3.7 原文"通用 VFS 键
+  （exec/auto/user/async 等）由 mount(8) 翻译为挂载 syscall 标志、
+  不会到达 gitfs"为事实错误——实测 libmount 仅滤除固定子集
+  （auto/noauto/comment=/x-*/loop/offset=/sizelimit=/defaults 及
+  传播键），noatime/relatime/strictatime/lazytime/diratime、sync/
+  dirsync、exec/noexec、user/users/owner/group（且隐式附带
+  noexec,nosuid,nodev）、_netdev、nofail、remount、uid=/gid=/
+  umask= 均原样到达 `-o` 串，按原口径全部命中"未知键 → libfuse
+  拒绝 → exit 1"——`mount -t gitfs -o noatime repo dir`（常见
+  习惯）必失败，fstab 含 `user`（非 root 挂载）或 `nofail`/
+  `_netdev`（boot 常见）必失败，与 §7.11(a) 的 rw 问题同类、主
+  集成路径仍被破坏。修订：到达的无关 VFS 键（noatime 族/sync
+  族/exec 族/user 族/_netdev/nofail）接受并忽略、verbose 记一条
+  （`rw`/ntfs-3g 先例；ro、atime≡mtime 语义下均无害）；`suid`/
+  `dev` 维持退出 1（实测确实到达，规范可测）；`remount`、`uid=`/
+  `gid=`/`umask=` 定为退出 1 并给专用错误文案（v0.1 无 remount/
+  属主映射语义，静默忽略会掩盖用户意图）；§3.7 正文与 man 页
+  INVOCATION/OPTIONS 同步，§4 的 mount(8) exec 路径用例由三场景
+  扩至五场景（增 `-o noatime` 与 fstab `user` 两用例，另以直连
+  调用断言 remount/uid= 的专用错误）；
+  (b) **`-N` 转交补全（小）**：mount(8) 助手契约语法实为
+  `[-sfnv] [-N namespace] [-o options]`，`--namespace` 时助手收到
+  `-N <ns>`——§7.11(b) 的"只转交 -s/-f/-n/-v 与 -o"表述不完整，
+  `-N` 原会按未知选项 exit 1；修订为与 `-n`/`-s` 同列容忍忽略
+  （本沙箱无法实测 `-N` 转交——mount(8) 在 exec 前拒绝切
+  namespace——但 man 页契约明载）；
+  (c) **选项后置解析（小）**：实测助手 argv 为 `<src> <dir> -f -o
+  rw`——选项出现在位置参数之后，§3.7 用法行原仅示选项在前；
+  注明解析须容忍选项后置（GNU getopt 置换），否则主路径直接破；
+  (d) **退出码 0 措辞勘误**：§3.7 与 man 页 EXIT STATUS 原"0 正常
+  卸载"（"Normal unmount"）对 mount 助手不成立——mount(8) 传播的
+  exit 0 语义是"挂载成功（守护进程化后父进程退出）"，卸载由
+  umount(8)/fusermount3 完成、不经本程序；改为"0 挂载成功（或
+  前台优雅终止）/fake 通过均 0"。
