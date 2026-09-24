@@ -2,7 +2,7 @@
 
 - RFC 编号: 0000
 - 标题: gitfs — read-only git-to-FUSE 文件系统
-- 状态: Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6、§7.7、§7.8）
+- 状态: Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6、§7.7、§7.8、§7.9、§7.10、§7.11（§7.11 为定稿后 mount(8) 助手协议核验勘误））
 - 日期: 2026-09-24
 - 目标版本: 0.1.0
 
@@ -190,6 +190,12 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   快照语义，避免逐次 stat 漂移干扰 rsync 类工具；主流发行版 `relatime`
   挂载下内核本就不强制刷新 atime，用户无感知。
 - `st_nlink`：目录为 2，文件为 1（简化，不做精确统计）。
+- `st_blocks`/`st_blksize`/`st_rdev`（Q21d）：libfuse 不按 `st_size`
+  自动推导 `st_blocks`，缺省 0 会让 `du` 对全部文件报 0 块——显式钉为
+  `st_blocks = ceil(st_size / 512)`（`commits`/`.gitfs.json`/
+  `.gitfs-submodule` 等合成文件同口径，按其内容字节数计），
+  `st_blksize = 4096`（与 statfs 汇报的块大小一致），
+  `st_rdev = 0`（任何 entry 均非设备节点，与 nosuid/nodev 基线同向）。
 - `st_ino`：由完整 VFS 路径字节的 64 位稳定哈希派生（`branch/`、
   `commits`、`.gitfs.json` 等合成入口同口径，根固定为 FUSE_ROOT_ID=1），
   跨重挂载确定，`tar`/`find -inum`/`diff` 等工具得到可复现的 inode。
@@ -453,11 +459,20 @@ mount <mountpoint>                                # /etc/fstab 条目触发
 mount.gitfs <repo> <mountpoint> [选项]            # 直连调用
 ```
 
-mount(8) 按助手约定转交 `-n/-s/-v/-r/-w` 标志与 `-o` 选项串；fstab 条目
+**mount(8) 实际转交行为（经 util-linux 2.42.3 libmount 源码逐条核验，
+Q21 勘误 Q13(a)）**：libmount exec 助手时只转交助手契约短选项
+`-s/-f/-n/-v`（`--fake` 转交为 `-f`）与 `-o` 选项串；`-r`/`-w` **从不
+以标志形式转交**，而是由 libmount 并入 `-o` 串（`-r` → 追加 `ro`、
+`-w` → 追加 `rw`）；且对未显式只读（`-r` 或 `-o ro`）的调用，libmount
+**无条件在 `-o` 串中预置 `rw`**——裸调用 `mount -t gitfs <repo> <dir>`
+实际到达助手的是 `-o rw`，故 `rw` 必须被接受（见下选项说明），否则
+§0/本节首推的默认调用形态必然 exit 1。fstab 条目
 `/path/repo  /mnt/gitfs  gitfs  ro,blob-cache-size=128  0  0` 同样经由
-助手挂载。通用 VFS 键（exec/auto/user/async 等）由 mount(8) 在调用助手前
-翻译为挂载 syscall 标志、不会到达 gitfs；直连调用时出现在 `-o` 中的其余
-键则透传 libfuse（见下）。
+助手挂载；util-linux ≥2.35 还允许 CLI `-o` 在 fstab 选项之上增改
+（合并串中同一键可出现两次），相应覆盖语义见下"后者胜"规则。通用
+VFS 键（exec/auto/user/async 等）由 mount(8) 在调用助手前翻译为挂载
+syscall 标志、不会到达 gitfs；直连调用时出现在 `-o` 中的其余键则
+透传 libfuse（见下）。
 
 ```
 用法: mount.gitfs [选项] <repository> <mountpoint>
@@ -465,18 +480,23 @@ mount(8) 按助手约定转交 `-n/-s/-v/-r/-w` 标志与 `-o` 选项串；fstab
 选项:
   -o OPT[,OPT…]       键值/开关形态。gitfs 自有键 blob-cache-size=<MiB>、
                        tree-cache-size=<MiB>（连字符与下划线拼法等价），
-                       与同名长选项语义、校验完全一致，同一键重复给出
-                       （含与长选项混用）→ 参数错误退出 1；与硬编码基线
-                       同义的键（ro/nosuid/nodev/default_permissions/
-                       use_ino）
-                       接受为冗余无操作，反向键（rw/suid/dev）报错退出
-                       1，防安全基线被 CLI 稀释或顶掉（Q10/Q13/Q14）；
-                       `fsname=` 允许透传覆盖基线（cosmetic），
-                       `subtype=` 覆盖基线 → 参数错误退出 1（基线保护，
-                       Q15a）；其余
-                       键原样透传 libfuse 选项解析器（如 kernel_cache；
-                       allow_other 需 /etc/fuse.conf 启用
-                       user_allow_other），未知键由 libfuse 拒绝 → 退出 1
+                       与同名长选项语义、校验完全一致；同一键重复给出
+                       取"后者胜"（出现序：fstab 条目 → 命令行选项按
+                       命令行先后，-o 串内从左到右），对齐 mount(8) 的
+                       fstab+CLI 合并惯例（util-linux ≥2.35，Q21c），
+                       不因该覆盖流退出 1；与硬编码基线同义的键（ro/
+                       nosuid/nodev/default_permissions/use_ino）接受为
+                       冗余无操作；`rw` 同样接受为无操作并记 stderr
+                       警告——libmount 对非只读调用无条件预置该键
+                       （见上，Q21a），ro 为硬编码基线、安全不被稀释
+                       （ntfs-3g 同先例）；反向键 suid/dev 报错退出 1，
+                       防安全基线被 CLI 稀释或顶掉
+                       （Q10/Q13/Q14/Q21）；`fsname=` 允许透传覆盖基线
+                       （cosmetic），`subtype=` 覆盖基线 → 参数错误
+                       退出 1（基线保护，Q15a）；其余键原样透传 libfuse
+                       选项解析器（如 kernel_cache；allow_other 需
+                       /etc/fuse.conf 启用 user_allow_other），未知键由
+                       libfuse 拒绝 → 退出 1
   --blob-cache-size <MiB>  blob LRU 缓存上限（默认 64）；值为正整数
                        （十进制 MiB）——0、负数、非数字或溢出 size_t →
                        参数错误（退出码 1）；不设人为上限，受可用内存约束
@@ -484,15 +504,19 @@ mount(8) 按助手约定转交 `-n/-s/-v/-r/-w` 标志与 `-o` 选项串；fstab
                        （默认 256，即 libgit2 默认值）；校验规则与
                        --blob-cache-size 相同；与 blob 缓存各自独立记账
                        （见 3.5、Q13）
-  --foreground / -f    前台运行（默认守护进程化）；mount(8) 的 --fake
-                       由其自身消化、不会转交助手，-f 无歧义
+  --foreground         前台运行（默认守护进程化）；仅长选项形态——
+                       短选项 -f 已按助手契约保留给 fake（Q21b）
+  -f                   fake（mount(8) 的 --fake 转交形态：libmount 的
+                       exec_helper 即向助手传 -f，Q21b）：完整校验参数
+                       与全部选项后不挂载、退出 0
   --verbose / -v       输出路径解析与缓存命中日志，及 blob 全量解压
                        事件（每次解压一条，即解压计数：超限 open-pin
                        与缓存 miss 装载各一条，见 3.5）
                        （mount(8) 的 -v 映射至此）
   -n / -s              mount(8) 转交的 no-mtab / sloppy 标志：容忍并忽略
-  -r / -w              mount(8) 转交的只读/读写标志：-r 接受（默认即 ro），
-                       -w 报错退出 1（只读文件系统）
+                       （-r/-w 从不以标志形式转交——libmount 并入 -o
+                       串为 ro/rw，见上；直连调用显式传 -r/-w 按未知
+                       选项处理 → 参数错误退出 1）
   --version / --help
 ```
 
@@ -505,7 +529,8 @@ mount(8) 按助手约定转交 `-n/-s/-v/-r/-w` 标志与 `-o` 选项串；fstab
   -t gitfs` 的匹配依赖它。
 - 卸载：`umount <mountpoint>`（或 `fusermount3 -u`）；守护进程收到
   `SIGINT`/`SIGTERM` 亦优雅退出（见 3.4）。
-- 退出码：0 正常卸载；1 参数错误；2 仓库不可读/不是 git 仓库；3 挂载失败。
+- 退出码：0 正常卸载，或 `-f` fake 校验通过后不挂载退出；1 参数错误；
+  2 仓库不可读/不是 git 仓库；3 挂载失败。
 
 ### 3.8 安全注意事项
 
@@ -613,6 +638,18 @@ gitfs/
     断言：大容量 `--blob-cache-size` 挂载下首次读大可缓存 blob 期
     间并发的根 readdir 不被长时间阻塞（自管 runner、宽松阈值，见
     3.5/Q19a）；
+    **mount(8) exec 路径三场景（Q21）**：经真实 `mount -t gitfs`（需
+    util-linux ≥2.35 与特权环境，CI 无特权时 skip 标记）走 libmount
+    exec_helper 全链路：(1) 默认调用 `mount -t gitfs <repo> <dir>`
+    （不带 -o ro）——libmount 预置的 `-o rw` 到达助手，断言被接受
+    （stderr 记警告）且挂载成功、卸载干净；(2) `mount --fake -t gitfs
+    <repo> <dir>`——断言转交的 `-f` 走 fake 语义：参数与选项完整
+    校验通过、mountpoint 未被挂载、退出码 0；(3) fstab 条目
+    `blob-cache-size=128` + CLI `-o blob-cache-size=256` 合并调用——
+    断言自有键后者胜（挂载后读 `.gitfs.json` 的 `cache.blob_bytes`
+    = 256×1024²）；另增 st_blocks 断言：`du`（512B 块口径）对普通
+    文件与合成文件报块数 = ceil(st_size/512)，不再恒为 0
+    （见 3.2/Q21d）；
   - CI 上 `/dev/fuse` 不可用时集成测试自动 skip（标记），在自管 runner 跑全量。
 - **可观测性**：`-v/--verbose` 输出解析日志；错误信息含 oid 与 errno 上下文。
 
@@ -659,7 +696,9 @@ gitfs/
   unborn HEAD 时 `.gitfs.json` 的 `head` 为 `null`（见 3.2、3.6）。
 - **Q10 statfs 口径与 CLI 黑名单（已决）**：`f_blocks` = 本地 ODB 占用
   （pack + loose，不含 alternates）；`-o` 拒绝名单补入反向键
-  `rw/suid/dev`（见 3.3、3.7）。
+  `rw/suid/dev`（见 3.3、3.7）（`rw` 经 §7.11(a)/Q21 勘误改为接受为
+  无操作并记 stderr 警告——libmount 对助手调用无条件预置该键；现行
+  拒绝名单为 `suid/dev`）。
 - **Q11 libgit2 缓存调参与防双层缓存（已决）**：tree/commit 依赖
   libgit2 内置缓存，但显式抬 per-type 上限（tree 1MiB——默认 4KiB 会
   漏掉大目录 tree，拖垮元数据密集负载）；blob per-type **写死 0**，
@@ -686,16 +725,22 @@ gitfs/
 - **Q13 mount(8) 助手形态与缓存参数（已决）**：(a) 可执行文件更名为
   `mount.gitfs`（安装 `$(sbindir)`），`mount -t gitfs`、fstab 条目与直连
   三种调用等价；mount(8) 转交标志映射定案（`-r` 接受、`-w` 报错退出 1、
-  `-n`/`-s` 容忍忽略、`-v` 映射 verbose，`--fake` 由 mount(8) 自身消化）；
+  `-n`/`-s` 容忍忽略、`-v` 映射 verbose，`--fake` 由 mount(8) 自身消化）
+  ——该转交口径基于错误前提，经 §7.11(a)(b)/Q21 全面勘误：libmount
+  实际仅转交 `-s/-f/-n/-v` 与 `-o` 串（`--fake` → `-f`），`-r`/`-w`
+  并入 `-o` 串为 `ro`/`rw` 且非只读调用无条件预置 `rw`，故 `rw` 接受
+  并记警告、`-f` 实现为 fake、前台仅 `--foreground`；
   `-o` 增加键值形态，自有键 `blob-cache-size`/`tree-cache-size`（连字符/
-  下划线等价）与同名长选项同语义，同一键重复给出 → 退出 1；(b)
+  下划线等价）与同名长选项同语义，同一键重复给出 → 退出 1（该口径经
+  §7.11(c)/Q21 修订为按出现序后者胜）；(b)
   `--cache-size` 更名 `--blob-cache-size`，新增 `--tree-cache-size`
   （默认 256MiB，即 libgit2 对象缓存默认总预算，映射
   `GIT_OPT_SET_CACHE_MAX_SIZE`），校验规则沿用 Q12(f)：正整数、0/负/
   非法/溢出 → 退出 1，无人为上限，与 blob 缓存独立记账（见 3.5、3.7）；
   (c) 修订 Q10 黑名单：与基线同义的键（ro/nosuid/nodev/
   default_permissions）接受为冗余无操作（fstab `ro,...` 场景需要），
-  反向键（rw/suid/dev）仍报错退出 1；(d) `.gitfs.json` 的 `cache_bytes`
+  反向键（rw/suid/dev）仍报错退出 1（`rw` 经 §7.11(a)/Q21 再修订为
+  接受并记警告）；(d) `.gitfs.json` 的 `cache_bytes`
   扩展为 `cache` 对象（blob/tree 双口径字节，见 3.6）；(e) man 页更名
   `docs/mount.gitfs.8`（man8 章节，mount 助手惯例），头注释同步 Q1-Q13。
 
@@ -852,3 +897,43 @@ gitfs/
   and cache-miss LRU loads”存在措辞范围差；改为“blob 全量解压
   事件（超限 open-pin 与缓存 miss 装载各一条）”，三处口径对齐，
   纯措辞修订、功能无影响。
+
+### 7.11 mount(8) 助手协议核验勘误（2026-09-24，定稿后 review 跟进）
+
+- **Q21 libmount 转交行为实测核验、重复键合并与 st_blocks（已决）**：
+  以 util-linux 2.42.3 libmount 源码逐条核验助手协议后修订四项：
+  (a) **`rw` 改为接受**：libmount exec 助手时无条件在 `-o` 串中预置
+  `rw`（optlist.c 的 `mnt_optlist_strdup_optstr` 对
+  MNT_OL_FLTR_HELPERS 恒 append "rw"，仅 MS_RDONLY 时转写为
+  "ro"），而 Q10/Q13(c) 原定反向键 `rw` 报错退出 1——裸调用
+  `mount -t gitfs <repo> <dir>`（不带 -o ro）必然 exit 1，与 §0/§3.7
+  首推的默认调用形态自相矛盾；`rw` 改为接受为无操作并记 stderr
+  警告（ro 为硬编码基线、安全不被稀释，ntfs-3g 同先例），`suid`/
+  `dev` 维持报错退出 1；Q10/Q13(c) 的“rw 报错”口径就此作废；
+  (b) **`-f` 即 fake、前台仅长选项**：libmount 的 exec_helper 在
+  `--fake` 时向助手转交 `-f`（mount(8) EXTERNAL HELPERS 语法即
+  [-sfnv]），Q13(a) 的“--fake 由 mount(8) 自身消化、-f 无歧义”
+  不成立；且 `-r`/`-w` 从不以标志形式转交、而是并入 `-o` 串
+  （`mnt_context_mount_setopt`：-r → 追加 ro、-w → 追加 rw），
+  Q13(a) 的 -r/-w 标志映射行基于同一错误前提一并作废；短选项
+  `-f` 实现为 fake（完整校验参数与全部选项后不挂载、退出 0），
+  前台改用长选项 `--foreground`，直连显式 `-r`/`-w` 按未知选项
+  处理；
+  (c) **自有键重复取“后者胜”**：util-linux ≥2.35 允许 `-o` 在 fstab
+  选项之上增改（合并后同一键可出现两次），fstab
+  `blob-cache-size=128` + CLI `-o blob-cache-size=256` 的正常覆盖
+  流会命中 Q13(a) 的“同一键重复 → 退出 1”；自有键
+  （blob-cache-size/tree-cache-size）改为按出现序后者胜（fstab
+  → 命令行，-o 串内从左到右，与长选项按命令行先后交错计序），
+  与 mount 惯例对齐并文档化；基线同义键与 `rw` 的重复本就是
+  无操作/警告后无操作，不受影响；
+  (d) **st_blocks/st_blksize/st_rdev 钉住**：libfuse 不自动按
+  st_size 推导 st_blocks（缺省 0 会让 du 对全部文件报 0 块），钉
+  为 ceil(st_size/512)（合成文件同口径）、st_blksize=4096、
+  st_rdev=0（见 3.2）；
+  §3.2/§3.7 正文与 man 页（INVOCATION/OPTIONS/File metadata/
+  EXIT STATUS/EXAMPLES）同步修订；§4 新增“mount(8) exec 路径”集
+  成用例三场景：默认调用（无 -o ro，断言 libmount 预置 rw 被接受
+  且挂载成功）、`mount --fake` 转交 `-f`（校验通过、不挂载、退出
+  0）、fstab+CLI 同键覆盖（后者胜，以 `.gitfs.json` 的 cache 字段
+  断言生效值），另增 st_blocks 的 du 断言。

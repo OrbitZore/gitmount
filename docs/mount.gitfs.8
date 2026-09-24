@@ -1,4 +1,4 @@
-.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q19)
+.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q21)
 .TH MOUNT.GITFS 8 "2026-09-24" "gitfs 0.1.0" "System Administration"
 .SH NAME
 mount.gitfs \- mount a git repository as a read\-only FUSE filesystem
@@ -50,15 +50,41 @@ three equivalent ways:
 .TP
 .BI mount \-t \ gitfs \ repository \ mountpoint
 .BR mount (8)
-execs the helper, passing on its
-.BR \-n ,
+execs the helper with the helper\-contract short options
 .BR \-s ,
-.BR \-v ,
-.BR \-r ,
-.BR \-w ,
+.BR \-f ,
+.BR \-n ,
 and
+.B \-v
+plus the
 .B \-o
-arguments (see OPTIONS for the mapping).
+options string (see OPTIONS for the mapping; behavior verified
+against util\-linux 2.42.3 libmount).
+.B \-\-fake
+is forwarded to the helper as
+.BR \-f ;
+.B \-r
+and
+.B \-w
+are never forwarded as flags \(em libmount folds them into the
+.B \-o
+string as
+.B ro
+or
+.B rw
+\(em and a call without explicit read\-only intent (no
+.B \-r
+and no
+.BR \-o\ ro )
+always reaches the helper with
+.B rw
+already in its options string, so a plain
+.B "mount \-t gitfs repo dir"
+invokes
+.BR "mount.gitfs \-o rw repo dir" ,
+which the helper accepts with a warning (see
+.B \-o
+under OPTIONS).
 .TP
 .I /etc/fstab
 entry
@@ -71,6 +97,11 @@ entry
 Generic VFS options (exec, auto, user, async, ...) are translated by
 .BR mount (8)
 itself and never reach the helper.
+With util\-linux >= 2.35 a command\-line
+.B \-o
+augments the fstab options (the merged string may list the same key
+twice); gitfs\-specific keys then follow last\-one\-wins ordering
+(see OPTIONS).
 .TP
 .B mount.gitfs
 .I repository mountpoint
@@ -203,18 +234,29 @@ The gitfs\-specific keys
 and
 .BI tree\-cache\-size= MiB
 (dash and underscore spellings are equivalent) have exactly the same
-semantics and validation as the corresponding long options; specifying
-the same key more than once (long option and \-o combined) is a usage
-error.
+semantics and validation as the corresponding long options.
+If the same key is given more than once (within one \-o string, across
+fstab and command line \(em util\-linux >= 2.35 merges them \(em or
+mixed with the long options in command\-line order), the last
+occurrence wins, matching mount(8) conventions.
 Keys synonymous with the hardcoded baseline
 .RB ( ro ,
 .BR nosuid ,
 .BR nodev ,
 .BR default_permissions ,
 .BR use_ino )
-are accepted as redundant no\-ops; their reverse counterparts
-.RB ( rw ,
-.BR suid ,
+are accepted as redundant no\-ops.
+.B rw
+is likewise accepted as a no\-op, with a stderr warning: libmount
+unconditionally places
+.B rw
+in the helper's options string for a call without read\-only intent,
+so rejecting it would break the plain
+.B "mount \-t gitfs repo dir"
+invocation (ro stays hardcoded and cannot be diluted; ntfs\-3g uses
+the same convention).
+The remaining reverse keys
+.RB ( suid ,
 .B dev )
 are usage errors, so the baseline cannot be diluted.
 .BI fsname= name
@@ -285,13 +327,20 @@ not governed by
 .BR \-\-blob\-cache\-size ;
 the two caches account independently and never evict each other.
 .TP
-.BR \-f ", " \-\-foreground
+.BR \-\-foreground
 Run in the foreground (default: daemonize after mounting).
+Long option only: the short
+.B \-f
+is reserved for the mount(8) helper contract (fake mode, below).
+.TP
+.B \-f
+Fake mode \(em the form in which
 .BR mount (8)'s
 .B \-\-fake
-is consumed by
-.B mount
-itself and never forwarded, so there is no ambiguity.
+is forwarded to helpers (libmount's exec_helper passes
+.BR \-f ).
+All arguments and options are fully validated, then the helper exits
+with status 0 without mounting anything.
 .TP
 .BR \-v ", " \-\-verbose
 Log path resolution, cache hits, and blob decompression events to
@@ -305,13 +354,19 @@ headers only).
 Accepted and ignored (no\-mtab / sloppy flags forwarded by
 .BR mount (8)).
 .TP
-.BR \-r ", " \-w
-Read\-only / read\-write flags forwarded by
-.BR mount (8):
-.B \-r
-is accepted (read\-only is already the default),
-.B \-w
-is a usage error (the filesystem is read\-only).
+.B \-r ", " \-w
+Never received from
+.BR mount (8) :
+libmount does not forward them as flags, it appends
+.B ro
+or
+.B rw
+to the
+.B \-o
+string instead (\-r / \-o ro are redundant no\-ops; \-o rw is a
+warned no\-op, see above).
+Passing them explicitly on a direct invocation is a usage error
+(the filesystem is read\-only either way).
 .TP
 .BR \-\-version ", " \-\-help
 Print version / usage and exit.
@@ -370,6 +425,20 @@ multi\-GB blobs costs no more than a header lookup, just as getattr
 never triggers the
 .I commits
 revwalk.
+.PP
+.B st_blocks
+is always
+.BI ceil ( st_size /512)
+(512\-byte blocks; the synthetic files follow the same formula on
+their content size),
+.B st_blksize
+is 4096, and
+.B st_rdev
+is 0.
+libfuse does not derive st_blocks from st_size, and leaving it at its
+default 0 would make
+.B du
+report zero blocks for every file.
 .PP
 .B st_ino
 is a 64\-bit hash of the full path.
@@ -493,7 +562,9 @@ duration of the mount
 .SH EXIT STATUS
 .TP
 .B 0
-Normal unmount.
+Normal unmount, or a successful fake run of
+.B \-f
+(arguments validated, nothing mounted).
 .TP
 .B 1
 Usage error (bad arguments, forbidden
@@ -508,6 +579,7 @@ Mount failure.
 .SH EXAMPLES
 .nf
 mount \-t gitfs ~/src/myproj /mnt/gitfs
+mount \-\-fake \-t gitfs ~/src/myproj /mnt/gitfs   # forwarded as \-f: validate only
 ls /mnt/gitfs/branch/main/src
 grep ^0beec7b /mnt/gitfs/commits      # resolve a short prefix
 cat /mnt/gitfs/commit/<full\-oid>/README.md
