@@ -2,14 +2,17 @@
 
 - RFC 编号: 0000
 - 标题: gitfs — read-only git-to-FUSE 文件系统
-- 状态: Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2）
+- 状态: Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3）
 - 日期: 2026-09-24
 - 目标版本: 0.1.0
 
 ## 0. 摘要
 
-实现一个 C++17 编写的命令行程序 `gitfs`，把一个本地 bare 或普通 git 仓库挂载为
-**只读** FUSE 文件系统。挂载点根目录暴露下列入口：
+实现一个 C++17 编写的命令行程序 `mount.gitfs`（安装于 `$(sbindir)`，遵循
+mount(8) 助手命名约定 `mount.<type>`），把一个本地 bare 或普通 git 仓库挂载为
+**只读** FUSE 文件系统。支持三种等价调用：`mount -t gitfs <repo> <dir>`、
+`/etc/fstab` 条目、直连 `mount.gitfs <repo> <dir>`（见 3.7）。挂载点根目录
+暴露下列入口：
 
 ```
 /mnt/gitfs/
@@ -49,6 +52,8 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 5. 单机 Linux（fuse3），C++17，依赖仅 libgit2（≥1.4，提供 oid 类型查询）
    + libfuse3（≥3.10），CI 矩阵验证。
 6. 完整的开源工程配套：CMake、单测+集成测试、CI、文档、规范提交。
+7. 以 mount(8) 助手形态（`mount.gitfs`）与系统集成：`mount -t gitfs` 与
+   `/etc/fstab` 条目可直接使用（Q13）。
 
 ### 非目标（v0.1，未来另立 RFC）
 
@@ -207,7 +212,8 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 ### 3.5 缓存与性能
 
 - **blob LRU 缓存**：键 = blob oid，值 = 不可变字节串；容量按字节计，
-  默认 64 MiB，`--cache-size` 可调。命中则 `read` 为纯内存拷贝。
+  默认 64 MiB，`--blob-cache-size` 可调（Q13 前名 `--cache-size`）。命中则
+  `read` 为纯内存拷贝。
 - **tree/commit 依赖 libgit2 内置对象缓存，init 时显式调参**：默认 per-type
   上限仅 4KiB（源码 `cache.c` 的 `git_cache__max_object_size[]`），序列化
   超线的大目录 tree（~100+ entry 即超）不进缓存；而高层 fuse API 每个
@@ -215,8 +221,9 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   （见下），tree 命中率就是 `ls -R`/`find`/`du`/rsync 类元数据负载性能的
   全部。故 init 时以 `GIT_OPT_SET_CACHE_OBJECT_LIMIT(GIT_OBJECT_TREE, 1MiB)`
   抬线，COMMIT 同抬（commit 天然 <4KiB，仅防御病态巨型 merge commit，
-  无代价）；总预算 `GIT_OPT_SET_CACHE_MAX_SIZE` 维持默认 256MiB（1.9.7
-  实测），与 `--cache-size` **各自独立记账、互不挤占**。
+  无代价）；总预算 `GIT_OPT_SET_CACHE_MAX_SIZE` 设为 `--tree-cache-size`
+  的值（默认 256MiB，即 1.9.7 的实测默认值，Q13 起可调），与
+  `--blob-cache-size` **各自独立记账、互不挤占**，校验规则相同（见 3.7）。
 - **blob 保证不进 libgit2 缓存（防双层缓存）**：per-type 上限默认即 0
   （从不缓存；1.9.7 实测 lookup 后缓存计数恒 0，抬限后立即计入、再读
   命中），但这是默认值而非契约——任何一处
@@ -264,7 +271,7 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   "repository": "/abs/path/to/repo.git",
   "head": "refs/heads/main",      # detached 时为完整 oid；unborn 时为 null
   "mounted_at": "2026-09-24T02:29:00Z",
-  "cache_bytes": 67108864
+  "cache": { "blob_bytes": 67108864, "tree_bytes": 268435456 }
 }
 ```
 
@@ -272,32 +279,62 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 均为固定名）。
 
 **失效语义（显式声明）**：`.gitfs.json` 是**挂载时刻的快照**，挂载期间
-不可变——`repository`、`mounted_at`、`cache_bytes` 本就不随时间变化；
+不可变——`repository`、`mounted_at`、`cache` 配置本就不随时间变化；
 `head` 字段在挂载后分支切换/HEAD 移动时**不**跟随更新（需探测实时 HEAD
 请进入 `HEAD/` 目录或直接 `git rev-parse`）。它不参与 refs 指纹失效
 机制，重新挂载即刷新。
 
 ### 3.7 CLI 与退出码
 
+程序以 **mount(8) 助手** 形态发布：可执行文件安装为 `$(sbindir)/mount.gitfs`
+（命名遵循 `mount.<fstype>` 约定），三种调用形态等价：
+
 ```
-用法: gitfs [选项] <repository> <mountpoint>
+mount -t gitfs <repo> <mountpoint> [-o <opts>]   # 经 mount(8) exec 助手
+mount <mountpoint>                                # /etc/fstab 条目触发
+mount.gitfs <repo> <mountpoint> [选项]            # 直连调用
+```
+
+mount(8) 按助手约定转交 `-n/-s/-v/-r/-w` 标志与 `-o` 选项串；fstab 条目
+`/path/repo  /mnt/gitfs  gitfs  ro,blob-cache-size=128  0  0` 同样经由
+助手挂载。通用 VFS 键（exec/auto/user/async 等）由 mount(8) 在调用助手前
+翻译为挂载 syscall 标志、不会到达 gitfs；直连调用时出现在 `-o` 中的其余
+键则透传 libfuse（见下）。
+
+```
+用法: mount.gitfs [选项] <repository> <mountpoint>
 
 选项:
-  -o OPT       透传 fuse 选项（如 kernel_cache；allow_other 需
-               /etc/fuse.conf 启用 user_allow_other）；基线键
-               （ro/nosuid/nodev/default_permissions）及其反向键
-               （rw/suid/dev）出现即报错退出 1，防止安全基线被 CLI
-               稀释或被反向键顶掉
-  --cache-size <MiB>  blob LRU 缓存上限（默认 64）；值为正整数（十进制
-                      MiB）——0、负数、非数字或溢出 size_t → 参数错误
-                      （退出码 1）；不设人为上限，受可用内存约束
-  --foreground / -f  前台运行（默认守护进程化）
-  --verbose / -v     输出路径解析与缓存命中日志
+  -o OPT[,OPT…]       键值/开关形态。gitfs 自有键 blob-cache-size=<MiB>、
+                       tree-cache-size=<MiB>（连字符与下划线拼法等价），
+                       与同名长选项语义、校验完全一致，同一键重复给出
+                       （含与长选项混用）→ 参数错误退出 1；与硬编码基线
+                       同义的键（ro/nosuid/nodev/default_permissions）
+                       接受为冗余无操作，反向键（rw/suid/dev）报错退出
+                       1，防安全基线被 CLI 稀释或顶掉（Q10/Q13）；其余
+                       键原样透传 libfuse 选项解析器（如 kernel_cache；
+                       allow_other 需 /etc/fuse.conf 启用
+                       user_allow_other），未知键由 libfuse 拒绝 → 退出 1
+  --blob-cache-size <MiB>  blob LRU 缓存上限（默认 64）；值为正整数
+                       （十进制 MiB）——0、负数、非数字或溢出 size_t →
+                       参数错误（退出码 1）；不设人为上限，受可用内存约束
+  --tree-cache-size <MiB>  libgit2 对象缓存（tree/commit）总预算上限
+                       （默认 256，即 libgit2 默认值）；校验规则与
+                       --blob-cache-size 相同；与 blob 缓存各自独立记账
+                       （见 3.5、Q13）
+  --foreground / -f    前台运行（默认守护进程化）；mount(8) 的 --fake
+                       由其自身消化、不会转交助手，-f 无歧义
+  --verbose / -v       输出路径解析与缓存命中日志（mount(8) 的 -v 映射至此）
+  -n / -s              mount(8) 转交的 no-mtab / sloppy 标志：容忍并忽略
+  -r / -w              mount(8) 转交的只读/读写标志：-r 接受（默认即 ro），
+                       -w 报错退出 1（只读文件系统）
   --version / --help
 ```
 
 - 挂载选项硬编码基线：`ro,fsname=gitfs,default_permissions,subtype=gitfs,
   nosuid,nodev`。
+- 卸载：`umount <mountpoint>`（或 `fusermount3 -u`）；守护进程收到
+  `SIGINT`/`SIGTERM` 亦优雅退出（见 3.4）。
 - 退出码：0 正常卸载；1 参数错误；2 仓库不可读/不是 git 仓库；3 挂载失败。
 
 ### 3.8 安全注意事项
@@ -314,7 +351,8 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 
 ```
 gitfs/
-├── CMakeLists.txt            # >= 3.16，C++17，-Wall -Wextra -Wpedantic -Werror(CI)
+├── CMakeLists.txt            # >= 3.16，C++17，-Wall -Wextra -Wpedantic -Werror(CI)；
+│                             # install: $(sbindir)/mount.gitfs + $(mandir)/man8
 ├── LICENSE                   # GPL-3.0-or-later（SPDX 标注同左）
 ├── README.md                 # 快速开始、语义说明（含 /commits 首次 open
 │                             # 的停顿语义，见 3.4；挂载期间禁 gc 的运维
@@ -328,7 +366,7 @@ gitfs/
 ├── .github/workflows/ci.yml  # lint + build + test 矩阵（gcc/clang × ubuntu）
 ├── rfc/                      # 本目录：设计文档先行
 ├── src/
-│   ├── main.cpp              # CLI 解析、fuse 启动
+│   ├── main.cpp              # CLI/mount(8) 助手参数解析、fuse 启动
 │   ├── gitfs.hpp/.cpp        # fuse_ops 实现（路径解析、VFS 语义）
 │   ├── gitrepo.hpp/.cpp      # libgit2 RAII 封装（ref 解析、tree 下行）
 │   ├── object_cache.hpp      # blob LRU（单测覆盖）
@@ -351,7 +389,7 @@ gitfs/
 └── docs/
     ├── filesystem-semantics.md  # 对用户承诺的语义（本文 3.x 的稳定化版本；
     │                          # 必含"gc/prune 并发"与"空仓库"两节，见 3.1）
-    └── gitfs.1                  # man 手册（roff；CMake install 到 $(mandir)）
+    └── mount.gitfs.8            # man 手册（roff；CMake install 到 $(mandir)/man8）
 ```
 
 - **提交规范**：Conventional Commits（`feat:`/`fix:`/`docs:`…），CI 校验。
@@ -418,7 +456,8 @@ gitfs/
   libgit2 内置缓存，但显式抬 per-type 上限（tree 1MiB——默认 4KiB 会
   漏掉大目录 tree，拖垮元数据密集负载）；blob per-type **写死 0**，
   保证解压后 blob 仅存于自家 LRU、不双层缓存双记账；总预算维持默认
-  256MiB，与 `--cache-size` 独立记账（见 3.5）。
+  256MiB，与 `--cache-size` 独立记账（见 3.5；选项名与可调性经 Q13
+  调整为 `--blob-cache-size`/`--tree-cache-size`）。
 
 ### 7.2 勘误与语义补全（2026-09-24，review round 2 跟进）
 
@@ -433,3 +472,21 @@ gitfs/
   `--cache-size` 校验规则定案：正整数，0/负数/非法 → 退出码 1，无
   人为上限（见 3.7）。README 与 filesystem-semantics.md 大纲补
   "gc 并发""空仓库"内容（见 §4）。
+
+### 7.3 CLI 形态与缓存参数（2026-09-24，review round 4 跟进）
+
+- **Q13 mount(8) 助手形态与缓存参数（已决）**：(a) 可执行文件更名为
+  `mount.gitfs`（安装 `$(sbindir)`），`mount -t gitfs`、fstab 条目与直连
+  三种调用等价；mount(8) 转交标志映射定案（`-r` 接受、`-w` 报错退出 1、
+  `-n`/`-s` 容忍忽略、`-v` 映射 verbose，`--fake` 由 mount(8) 自身消化）；
+  `-o` 增加键值形态，自有键 `blob-cache-size`/`tree-cache-size`（连字符/
+  下划线等价）与同名长选项同语义，同一键重复给出 → 退出 1；(b)
+  `--cache-size` 更名 `--blob-cache-size`，新增 `--tree-cache-size`
+  （默认 256MiB，即 libgit2 对象缓存默认总预算，映射
+  `GIT_OPT_SET_CACHE_MAX_SIZE`），校验规则沿用 Q12(f)：正整数、0/负/
+  非法/溢出 → 退出 1，无人为上限，与 blob 缓存独立记账（见 3.5、3.7）；
+  (c) 修订 Q10 黑名单：与基线同义的键（ro/nosuid/nodev/
+  default_permissions）接受为冗余无操作（fstab `ro,...` 场景需要），
+  反向键（rw/suid/dev）仍报错退出 1；(d) `.gitfs.json` 的 `cache_bytes`
+  扩展为 `cache` 对象（blob/tree 双口径字节，见 3.6）；(e) man 页更名
+  `docs/mount.gitfs.8`（man8 章节，mount 助手惯例），头注释同步 Q1-Q13。

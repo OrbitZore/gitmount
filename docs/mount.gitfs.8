@@ -1,19 +1,20 @@
-.\" gitfs(1) manual page — semantics per rfc/0000-gitfs.md (Q1-Q12)
-.TH GITFS 1 "2026-09-24" "gitfs 0.1.0" "User Commands"
+.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q13)
+.TH MOUNT.GITFS 8 "2026-09-24" "gitfs 0.1.0" "System Administration"
 .SH NAME
-gitfs \- mount a git repository as a read\-only FUSE filesystem
+mount.gitfs \- mount a git repository as a read\-only FUSE filesystem
 .SH SYNOPSIS
-.B gitfs
-.RB [ \-f ]
-.RB [ \-v ]
-.RB [ \-\-cache\-size
-.IR MiB ]
-.RB [ \-o
-.IR fuse\-option ]
+.B mount.gitfs
+.RB [ options ]
+.I repository
+.I mountpoint
+.br
+.B mount
+.BI \-t \ gitfs
+.RB [ options ]
 .I repository
 .I mountpoint
 .SH DESCRIPTION
-.B gitfs
+.B mount.gitfs
 mounts a local git repository (bare or non\-bare, sha1 or sha256) as a
 .I read\-only
 FUSE filesystem.
@@ -38,6 +39,47 @@ with
 Object access is provided by libgit2; no
 .B git
 subprocesses are spawned and no network access is performed.
+.SH INVOCATION
+.B mount.gitfs
+follows the
+.BR mount (8)
+helper convention
+.RI ( mount.<type> )
+and is installed in the system sbin directory, so it is invoked in one of
+three equivalent ways:
+.TP
+.BI mount \-t \ gitfs \ repository \ mountpoint
+.BR mount (8)
+execs the helper, passing on its
+.BR \-n ,
+.BR \-s ,
+.BR \-v ,
+.BR \-r ,
+.BR \-w ,
+and
+.B \-o
+arguments (see OPTIONS for the mapping).
+.TP
+.I /etc/fstab
+entry
+.RS
+.nf
+/path/to/repo  /mnt/gitfs  gitfs  ro,blob\-cache\-size=128  0  0
+.fi
+.RE
+.IP
+Generic VFS options (exec, auto, user, async, ...) are translated by
+.BR mount (8)
+itself and never reach the helper.
+.TP
+.B mount.gitfs
+.I repository mountpoint
+Direct invocation; identical semantics.
+.PP
+Unmount with
+.BR umount (8)
+or
+.BR fusermount3 (1).
 .SH MOUNT LAYOUT
 .TP
 .I branch/
@@ -111,7 +153,9 @@ changing mid\-read never corrupt a reader.
 Mount metadata: format version, absolute repository path,
 .B head
 (ref name; full oid when detached; null when unborn),
-mount timestamp, and blob cache size in bytes.
+mount timestamp, and the configured cache sizes in bytes
+.RB ( cache.blob_bytes ,
+.BR cache.tree_bytes ).
 It is an immutable snapshot taken at mount time and does not track later
 HEAD movement \(em use
 .I HEAD/
@@ -120,35 +164,75 @@ or
 for live HEAD.
 .SH OPTIONS
 .TP
-.BI \-o \ fuse\-option
-Pass a FUSE option through to the mount (e.g.\&
+.BI \-o \ option[,option...]
+Comma\-separated options, the mount(8)\-style form of the long options
+below.
+The gitfs\-specific keys
+.BI blob\-cache\-size= MiB
+and
+.BI tree\-cache\-size= MiB
+(dash and underscore spellings are equivalent) have exactly the same
+semantics and validation as the corresponding long options; specifying
+the same key more than once (long option and \-o combined) is a usage
+error.
+Keys synonymous with the hardcoded security baseline
+.RB ( ro ,
+.BR nosuid ,
+.BR nodev ,
+.BR default_permissions )
+are accepted as redundant no\-ops; their reverse counterparts
+.RB ( rw ,
+.BR suid ,
+.B dev )
+are usage errors, so the baseline cannot be diluted.
+All other keys are forwarded verbatim to the libfuse option parser
+(e.g.\&
 .BR kernel_cache ;
 .B allow_other
 requires
 .B user_allow_other
 in
-.IR /etc/fuse.conf ).
-The hardcoded security baseline
-.RB ( ro ,\  nosuid ,\  nodev ,\  default_permissions )
-cannot be overridden: specifying any of those keys, or their reverse
-counterparts
-.RB ( rw ,\  suid ,\  dev ),
-is a usage error.
+.IR /etc/fuse.conf );
+unknown keys are rejected by libfuse (exit status 1).
 .TP
-.BI \-\-cache\-size \ MiB
+.BI \-\-blob\-cache\-size \ MiB
 Blob LRU cache limit in MiB (default 64).
 The value must be a positive integer; 0, negative, or unparseable
 values are usage errors (exit status 1); there is no artificial upper
 cap (bounded only by available memory).
-Tree and commit metadata is served from a separate internal cache
-(libgit2 object cache, 256 MiB by default) and is not governed by
-this option.
+.TP
+.BI \-\-tree\-cache\-size \ MiB
+Total budget of the libgit2 object cache (trees and commits) in MiB
+(default 256).
+Validation is identical to
+.BR \-\-blob\-cache\-size .
+Tree/commit metadata is served from this separate internal cache and is
+not governed by
+.BR \-\-blob\-cache\-size ;
+the two caches account independently and never evict each other.
 .TP
 .BR \-f ", " \-\-foreground
 Run in the foreground (default: daemonize after mounting).
+.BR mount (8)'s
+.B \-\-fake
+is consumed by
+.B mount
+itself and never forwarded, so there is no ambiguity.
 .TP
 .BR \-v ", " \-\-verbose
 Log path resolution and cache hits to stderr.
+.TP
+.BR \-n ", " \-s
+Accepted and ignored (no\-mtab / sloppy flags forwarded by
+.BR mount (8)).
+.TP
+.BR \-r ", " \-w
+Read\-only / read\-write flags forwarded by
+.BR mount (8):
+.B \-r
+is accepted (read\-only is already the default),
+.B \-w
+is a usage error (the filesystem is read\-only).
 .TP
 .BR \-\-version ", " \-\-help
 Print version / usage and exit.
@@ -269,12 +353,17 @@ Repository unreadable or not a git repository.
 Mount failure.
 .SH EXAMPLES
 .nf
-gitfs ~/src/myproj /mnt/gitfs
+mount \-t gitfs ~/src/myproj /mnt/gitfs
 ls /mnt/gitfs/branch/main/src
 grep ^0beec7b /mnt/gitfs/commits      # resolve a short prefix
 cat /mnt/gitfs/commit/<full\-oid>/README.md
 diff \-r /mnt/gitfs/tag/v1.0/src /mnt/gitfs/branch/main/src
-fusermount3 \-u /mnt/gitfs
+fusermount3 \-u /mnt/gitfs            # or: umount /mnt/gitfs
+.fi
+.PP
+/etc/fstab:
+.nf
+/path/to/repo  /mnt/gitfs  gitfs  ro,blob\-cache\-size=128,tree\-cache\-size=512  0  0
 .fi
 .SH SECURITY
 The kernel enforces ownership and permission checks
@@ -287,6 +376,7 @@ The repository path is canonicalized with
 .B realpath
 before use.
 .SH SEE ALSO
+.BR mount (8),
 .BR git (1),
 .BR fusermount3 (1),
 .BR mount.fuse3 (8)
