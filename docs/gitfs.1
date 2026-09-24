@@ -1,0 +1,259 @@
+.\" gitfs(1) manual page — semantics per rfc/0000-gitfs.md (Q1-Q10)
+.TH GITFS 1 "2026-09-24" "gitfs 0.1.0" "User Commands"
+.SH NAME
+gitfs \- mount a git repository as a read\-only FUSE filesystem
+.SH SYNOPSIS
+.B gitfs
+.RB [ \-f ]
+.RB [ \-v ]
+.RB [ \-\-cache\-size
+.IR MiB ]
+.RB [ \-o
+.IR fuse\-option ]
+.I repository
+.I mountpoint
+.SH DESCRIPTION
+.B gitfs
+mounts a local git repository (bare or non\-bare, sha1 or sha256) as a
+.I read\-only
+FUSE filesystem.
+Every branch, tag, remote\-tracking ref, and commit is presented as a
+directory containing the full snapshot of its tree, so any revision can be
+browsed with ordinary tools
+.RB ( ls ,
+.BR cat ,
+.BR grep ,
+diff tools) without
+.BR git\ checkout ,
+.BR git\ worktree ,
+or
+.BR git\ archive .
+.PP
+The repository is never modified: all write operations fail with
+.BR EROFS ,
+and the mount is forcibly
+.BR ro ", " nosuid ", " nodev
+with
+.BR default_permissions .
+Object access is provided by libgit2; no
+.B git
+subprocesses are spawned and no network access is performed.
+.SH MOUNT LAYOUT
+.TP
+.I branch/
+Local branches.
+Branch names containing
+.B /
+(e.g.\&
+.IR feature/foo )
+are rendered as nested directories.
+.TP
+.I tag/
+All tags, annotated and lightweight.
+A tag that points directly to a tree or blob object is not presented
+.RB ( ENOENT );
+only commit targets are shown.
+.TP
+.I commit/
+Arbitrary commits by full object id:
+.I commit/<oid>
+where
+.I <oid>
+is 40 hex chars (sha1) or 64 (sha256), naming a commit object itself
+\(em no peeling, no abbreviation.
+Listing
+.I commit/
+always returns an empty directory (commits are not enumerable).
+To resolve a short prefix, grep the
+.I commits
+listing file instead.
+.TP
+.I remote/
+Remote\-tracking refs
+.IR remote/<remote>/<branch> ,
+read directly from
+.IR refs/remotes/ .
+The symbolic ref
+.I refs/remotes/<remote>/HEAD
+is hidden (access yields
+.BR ENOENT ).
+.TP
+.I HEAD/
+Snapshot of the current
+.BR HEAD .
+An unborn
+.B HEAD
+yields
+.BR ENOENT .
+.TP
+.I commits
+Read\-only text file listing the full oid of every commit reachable from
+all refs
+.B and
+.BR HEAD
+(including detached\-HEAD\-only commits), one per line, in deterministic
+topological order.
+It is generated lazily on first
+.BR open ;
+before that
+.B stat
+reports size 0.
+On the first
+.B open
+the generation runs a full revwalk: on huge repositories (millions of
+commits) this can take seconds, and the open blocks for that long.
+Each
+.B open
+pins one snapshot version for the lifetime of the file handle, so refs
+changing mid\-read never corrupt a reader.
+.TP
+.I .gitfs.json
+Mount metadata: format version, absolute repository path,
+.B head
+(ref name; full oid when detached; null when unborn),
+mount timestamp, and blob cache size in bytes.
+It is an immutable snapshot taken at mount time and does not track later
+HEAD movement \(em use
+.I HEAD/
+or
+.B git\ rev\-parse
+for live HEAD.
+.SH OPTIONS
+.TP
+.BI \-o \ fuse\-option
+Pass a FUSE option through to the mount (e.g.\&
+.BR kernel_cache ;
+.B allow_other
+requires
+.B user_allow_other
+in
+.IR /etc/fuse.conf ).
+The hardcoded security baseline
+.RB ( ro ,\  nosuid ,\  nodev ,\  default_permissions )
+cannot be overridden: specifying any of those keys, or their reverse
+counterparts
+.RB ( rw ,\  suid ,\  dev ),
+is a usage error.
+.TP
+.BI \-\-cache\-size \ MiB
+Blob LRU cache limit in MiB (default 64).
+Tree and commit metadata is served from a separate internal cache
+(libgit2 object cache, 256 MiB by default) and is not governed by
+this option.
+.TP
+.BR \-f ", " \-\-foreground
+Run in the foreground (default: daemonize after mounting).
+.TP
+.BR \-v ", " \-\-verbose
+Log path resolution and cache hits to stderr.
+.TP
+.BR \-\-version ", " \-\-help
+Print version / usage and exit.
+.SH SEMANTICS
+.SS Read\-only data plane
+Every mutating syscall returns
+.BR EROFS ;
+the mount is
+.B ro\ +\ nosuid\ +\ nodev
+and the kernel performs standard permission checks
+.RB ( default_permissions ).
+.SS File metadata
+Directories are 0755, plain files 0644, executables 0755, symlinks 0777.
+.BR st_mtime ", " st_ctime ,
+and
+.B st_atime
+of tree content are all the committer time of the underlying commit
+(constant within a snapshot; atime never advances on read).
+.I commits
+carries its generation time,
+.I .gitfs.json
+the mount time.
+.SS Submodules
+Rendered as an empty directory plus a sibling text file
+.IR <name>\.gitfs\-submodule
+(mode 0644) containing two lines,
+.B url=<url>
+and
+.BI commit= <oid> ,
+where the url comes from the
+.I .gitmodules
+blob at that commit (empty, with a warning, if absent).
+.SS Symbolic links
+readlink returns the raw blob content, truncated at the first embedded
+NUL (kernel restriction, same as
+.B "git checkout"
+behavior); an empty blob yields an empty target.
+Targets may point anywhere, including outside the snapshot.
+.SS Object replacement
+.B gitfs
+does not honor
+.IR refs/replace :
+objects are always presented raw, matching
+.B "git \-\-no\-replace\-objects"
+semantics, so an oid maps to exactly one immutable object.
+.SS Names
+Tree entry names are passed through as raw bytes (non\-UTF\-8 names are
+not rewritten); entries literally named
+.B .
+or
+.B ..
+are skipped.
+.B statfs
+reports zero free blocks and zero free inodes, so
+.B df
+shows the mount as 100% used;
+.I f_blocks
+reflects the local object database size (packs + loose objects,
+alternates excluded).
+.SS Live updates
+.BR branch/ ", " tag/ ", and " remote/
+listings reflect external repository changes (new commits, tags, deleted
+branches) without remounting.
+Kernel attribute and entry cache timeouts default to 0 to avoid stale
+entries; users who know the repository will not change during a mount
+may opt in with
+.BR \-o\ kernel_cache .
+.SH EXIT STATUS
+.TP
+.B 0
+Normal unmount.
+.TP
+.B 1
+Usage error (bad arguments, forbidden
+.B \-o
+keys).
+.TP
+.B 2
+Repository unreadable or not a git repository.
+.TP
+.B 3
+Mount failure.
+.SH EXAMPLES
+.nf
+gitfs ~/src/myproj /mnt/gitfs
+ls /mnt/gitfs/branch/main/src
+grep ^0beec7b /mnt/gitfs/commits      # resolve a short prefix
+cat /mnt/gitfs/commit/<full\-oid>/README.md
+diff \-r /mnt/gitfs/tag/v1.0/src /mnt/gitfs/branch/main/src
+fusermount3 \-u /mnt/gitfs
+.fi
+.SH SECURITY
+The kernel enforces ownership and permission checks
+.RB ( default_permissions )
+and the mount is read\-only without suid or device nodes.
+Symlink targets and file names are repository\-controlled data and are
+passed through unmodified; do not browse mounts of untrusted
+repositories with root or other privileged accounts.
+The repository path is canonicalized with
+.B realpath
+before use.
+.SH SEE ALSO
+.BR git (1),
+.BR fusermount3 (1),
+.BR mount.fuse3 (8)
+.PP
+Full design and semantics:
+.I rfc/0000\-gitfs.md
+and
+.I docs/filesystem\-semantics.md
+in the gitfs source repository.

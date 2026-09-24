@@ -335,7 +335,8 @@ gitfs/
 ││                              # 与 refs/remotes/origin/HEAD（供隐藏断言）、
 │                              # refs/replace/<oid>（供 replace 不生效断言）
 └── docs/
-    └── filesystem-semantics.md  # 对用户承诺的语义（本文 3.x 的稳定化版本）
+    ├── filesystem-semantics.md  # 对用户承诺的语义（本文 3.x 的稳定化版本）
+    └── gitfs.1                  # man 手册（roff；CMake install 到 $(mandir)）
 ```
 
 - **提交规范**：Conventional Commits（`feat:`/`fix:`/`docs:`…），CI 校验。
