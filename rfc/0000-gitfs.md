@@ -2,7 +2,7 @@
 
 - RFC 编号: 0000
 - 标题: gitfs — read-only git-to-FUSE 文件系统
-- 状态: Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5）
+- 状态: Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6）
 - 日期: 2026-09-24
 - 目标版本: 0.1.0
 
@@ -89,11 +89,14 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
                            仅是默认分支树的重复，符号语义也无法在目录树中表达
 /HEAD                    → 当前 HEAD commit 的 root tree（unborn → ENOENT）
 /commit/<full-oid>       → 该 commit 的 root tree；oid 长度随仓库对象格式
-                           （sha1=40、sha256=64），格式非法 → ENOENT；
+                           （sha1=40、sha256=64），仅接受**小写**十六进制——
+                           大写 hex 与其他非法字符同判 → ENOENT（Q16f，与
+                           commits 清单的小写输出一致）；
                            oid 须指向 commit 对象本身，不做 peel——
                            annotated tag/tree/blob 的 oid → ENOENT
 /commits                 → 只读文件：全部可达 commit（可达自 refs
-                           与 HEAD）的完整 oid，每行一条，
+                           与 HEAD；入集与 peel 口径见 3.5——非 commit
+                           目标的 ref 跳过、不算错误）的完整 oid，每行一条，
                            拓扑序（确定性实现钉住在 3.5：
                            GIT_SORT_TOPOLOGICAL + 排序入队）；不支持
                            短前缀解析，用户
@@ -130,6 +133,16 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   规则保证一个 ref 不会是另一个的前缀，因此至多存在一个完整 ref 名前缀
   匹配，剩余分量即 tree 路径，无歧义；分组前缀节点与完整 ref 节点均为
   目录，getattr 语义一致。
+- **readdir 顺序全域钉住（Q16c）**：根目录、`branch/tag/remote`（含嵌套
+  ref 的分组前缀目录）与 tree 目录一律按**路径分量原始字节（memcmp，无
+  locale 参与）字典序**输出。tree 目录**重排**为字节字典序而非沿用
+  git tree 的内在条目序——后者按"目录名附加 `/` 后参与比较"的规则，
+  在 `foo`（目录）与 `foo.txt`（文件）这类组合上与纯字节序相反
+  （`0x2E '.'` < `0x2F '/'`，git 序把 `foo.txt` 排在 `foo/` 之前）——
+  换取整个挂载统一、可复现、不依赖 git 内部排序实现的枚举顺序；
+  `.gitfs-submodule` 合成项按其文件名参与同一排序；`.`/`..` 不由
+  gitfs 返回（由内核自产）。集成测试直接断言字节序，或以
+  `LC_ALL=C sort` 归一后与 `git ls-tree` 比对集合（见 §4）。
 - `/branch`、`/tag`、`/remote` 的 readdir 实时反映仓库外部更新（`/commit`
   恒为空，见上），新 commit、新 tag 无需重新挂载即可见；已解析的旧对象只要
   仍存在于 ODB 中就继续可访问（配合 3.5 的缓存策略）。
@@ -177,6 +190,13 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   ——跨重挂载可复现性**在冲突路径上除外**（10⁶ 条目生日碰撞概率
   ≈ 3×10⁻⁸，实际不可达；注册表是正确性兜底而非预期路径）。
   挂载基线因此增补 `use_ino`（见 3.7），由 gitfs 填充该派生值。
+  **注册表内存上界（Q16b，显式声明）**：条目**懒注册**——仅
+  getattr/readdir 实际解析过的路径才入表，不做全仓库预注册；占用上界
+  ∝ 挂载期内被触及的**不同** VFS 路径数（每条 ≈ 路径字节数 + 数十
+  字节哈希桶/指针开销，百万级触及路径 ≈ 数十 MB 量级）。条目在挂载期
+  内**不回收**（分支删除后仍保留）：inode 号永不复用，规避"同号异
+  对象"对 `find -inum`、NFS 句柄类工具的误导；该上界与不回收语义在
+  README 与 filesystem-semantics.md 中声明（见 §4）。
 - `st_uid`/`st_gid`：挂载进程的 uid/gid（fuse 默认行为）。
 - 合成文件的 `st_mtime`：`commits` 为其生成时刻——**生成前**（§3.3 的
   `st_size=0` 窗口期）为**挂载时刻**（Q15b，与 `.gitfs.json` 同口径：
@@ -187,6 +207,12 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   open 起可见新版本"口径一致。`.gitfs-submodule` 为所属 commit 的
   committer time（内容确定性派生自树，避免逐次 stat 漂移）；
   `.gitfs.json` 为挂载时刻（快照语义，见 3.6）。
+- **合成入口的其余元数据（Q16d）**：`commits` 与 `.gitfs.json` 为
+  `S_IFREG | 0444`、`nlink=1`（写路径本就 `EROFS`，mode 与语义一致，
+  `cp` 类工具按只读源处理）；根目录与 `/branch`、`/tag`、`/remote`、
+  `/commit`、`/HEAD` 五个入口目录的 `st_mtime/ctime/atime` 为**挂载
+  时刻**（`nlink=2` 按通用规则）——入口集合虽实时枚举，时间戳钉住
+  挂载快照不漂移，与 `.gitfs.json` 同口径。
 - `.gitfs-submodule` 说明文件：mode `0644`，内容为两行 `key=value` 文本——
   `url=<submodule url>` 与 `commit=<完整 oid>`（各以 LF 结尾）；url 取自该
   commit 树根 `.gitmodules` 中对应 path 的条目，缺失或无对应条目时 `url=`
@@ -197,7 +223,7 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 | 操作 | 行为 |
 |---|---|
 | `getattr` | 路径 → 对象（3.1），失败 `ENOENT`；`commits` 恒为纯缓存读（未生成时 `st_size=0`），**不**触发 revwalk 或指纹重算（见 3.5） |
-| `readdir` | 根：固定列表；`branch/tag/remote`：枚举 ref（含 `/` 的名字按目录分组）；`commit`：**恒为空**；tree：枚举 entries（含 `.gitfs-submodule` 合成项）。注册 `opendir/releasedir`：枚举列表快照挂于 `fi->fh`，保证单目录流内 offset 续读稳定（fuse3 要求），跨目录流实时反映 ref 变化 |
+| `readdir` | 根：固定列表；`branch/tag/remote`：枚举 ref（含 `/` 的名字按目录分组）；`commit`：**恒为空**；tree：枚举 entries（含 `.gitfs-submodule` 合成项）——全部目录（含根）的输出顺序一律按分量原始字节字典序（见 3.1）。注册 `opendir/releasedir`：枚举列表快照挂于 `fi->fh`，保证单目录流内 offset 续读稳定（fuse3 要求），跨目录流实时反映 ref 变化 |
 | `open`/`release` | 仅校验 `O_RDONLY` 系标志（写标志 → `EROFS`，与内核对 ro 挂载的判定一致）；`commits` 首次 `open` 触发生成（见 3.5），且把当前缓冲版本**钉住于 `fi->fh`**——同一次 open 的所有 read 分片读自同一快照，refs 中途变化不影响（与 readdir 的目录流快照同构），`release` 时解除钉住；`.gitfs.json` 挂载期内不可变，无需钉住 |
 | `read` | 定位 blob（经 LRU 缓存），拷贝 `[offset, offset+size)` 越界截断；合成文件（`commits`、`.gitfs.json`、`.gitfs-submodule`）为整块只读缓冲，`commits` 读 open 时钉住的版本 |
 | `readlink` | symlink blob 内容；内容含嵌入 NUL 时**截断至首个 NUL**（内核 symlink 目标不可含 NUL；与 `git checkout` 的事实行为一致，显式同语义而非 `EIO`）；空 blob → 返回长度 0 的空目标；超过 PATH_MAX → `ENAMETOOLONG` |
@@ -238,6 +264,15 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 - **blob LRU 缓存**：键 = blob oid，值 = 不可变字节串；容量按字节计，
   默认 64 MiB，`--blob-cache-size` 可调（Q13 前名 `--cache-size`）。命中则
   `read` 为纯内存拷贝。
+  **超限 blob 绕过缓存直读（Q16e）**：单个 blob 大于当前
+  `--blob-cache-size` 时**不插入缓存、也不触发既有条目逐出**（为单个
+  超限对象清空整池只会引起缓存抖动），其每次 read 经 libgit2 直取
+  内容后切片拷贝——packfile 走 mmap，重复读由内核页缓存兜底，开销
+  可接受；流式按需解压留作后续优化，v0.1 不做。**并发装载天然
+  single-flight**：blob 装载与直读均在 3.4 的单互斥下串行执行——
+  可缓存 blob 由首个装载线程填充、其余线程命中复用；超限 blob 的
+  各次直读亦被串行化——不存在同一 blob 的重复并发解压或缓存竞态，
+  无需额外协调结构。
 - **tree/commit 依赖 libgit2 内置对象缓存，init 时显式调参**：默认 per-type
   上限仅 4KiB（源码 `cache.c` 的 `git_cache__max_object_size[]`），序列化
   超线的大目录 tree（~100+ entry 即超）不进缓存；而高层 fuse API 每个
@@ -259,10 +294,20 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   进程间共享、可回收，属正常分层而非堆内重复，与 LRU 互补不冲突；
   `GIT_OPT_ENABLE_CACHING` 保持默认开启（libgit2 公开 API 即此，不存在
   按 odb 实例设置缓存的接口）。
-- `/commits` 清单：**首次 `open` 时** revwalk 全量生成（push 全部 refs
-  **加 HEAD**——detached HEAD 独有的 commit 也纳入清单，与 §0 "全部可达"
-  的宣称一致，即可达集 = refs ∪ HEAD；`refs/remotes/<remote>/HEAD`
-  符号引用跳过——其目标分支本身已在枚举集合内，可达集不变），整块缓存；
+- `/commits` 清单：**首次 `open` 时** revwalk 全量生成（**入队集合钉住
+  （Q16a）**：枚举 `refs/` 下**全部** ref——heads/tags/remotes 之外，
+  notes、stash、replace 等特殊命名空间一并纳入，对齐
+  `git --no-replace-objects rev-list --all` 的 oracle（实测 git 对该
+  集合同样全量枚举）；符号引用（如 `refs/remotes/<remote>/HEAD`）先
+  解析至目标 ref 再处理；每个目标**逐个 peel 至 commit**，peel 失败
+  者——轻量 tag 指向 blob/tree（§3.1 合法形态）等非 commit 目标——
+  **跳过并记 verbose 日志，不算错误**（`git rev-list --all` 对此类
+  ref 亦静默跳过），绝不因个别非 commit ref 使整个清单生成失败或
+  退化为 `EIO`；**另加 HEAD**——detached HEAD 独有的 commit 也纳入
+  清单，与 §0 "全部可达"的宣称一致，即可达集 = 全部 refs ∪ HEAD。
+  replace ref 以普通 ref 身份入队（其指向的替换 commit 若在 ODB 中
+  即入清单），但对象读取不遵循替换——与 §3.1/Q8 的透传语义一致），
+  整块缓存；
   以 refs 指向集合**加 HEAD 指向**的指纹为失效键，任一变化才重建。
   **拓扑序确定性的实现钉住**：walker 设 `GIT_SORT_TOPOLOGICAL`，且入队
   序固定——收集到的完整 ref 名列表按字典序显式排序后逐个 push（不
@@ -282,7 +327,8 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   open 语义为"下一次 open 起可见新版本"；并发首次 open 的 single-flight
   串行化见 3.4。挂载后后台线程预生成留作后续
   可选优化（如 `--prewarm`），v0.1 不做。110 万 commit ≈ 45MB 文本
-  （sha1 口径：每行 41B 含 LF；sha256 仓库为 65B/行 ≈ 74MB），内存与
+  （sha1 口径：每行 41B 含 LF；sha256 仓库为 65B/行 ≈ 71.5MB——
+  65B × 110 万，Q16(f) 勘误原 74MB 口径），内存与
   grep 均可接受。
 - FUSE 侧默认 **不开启 kernel_cache**：显式置 `attr_timeout=0、
   entry_timeout=0`（注意 fuse3 默认值均为 1s，不显式置 0 则有 1 秒陈旧窗口）：
@@ -316,6 +362,12 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 
 便于脚本探测与调试；与仓库内容无命名冲突（根目录不呈现仓库树，合成文件
 均为固定名）。
+
+**非 UTF-8 仓库路径的转义（Q16f）**：JSON 文本必须是合法 UTF-8，
+`repository` 字段对仓库路径中构成**非法 UTF-8 序列**的字节按 `%XX`
+百分号转义（ASCII 与合法多字节序列原样保留），任意文件系统路径都能
+产出可被严格 JSON 解析器接受的文本；`head` 为 ref 名或 oid（ASCII）、
+`mounted_at`/`cache` 数值不受影响。
 
 **失效语义（显式声明）**：`.gitfs.json` 是**挂载时刻的快照**，挂载期间
 不可变——`repository`、`mounted_at`、`cache` 配置本就不随时间变化；
@@ -404,7 +456,8 @@ gitfs/
 ├── LICENSE                   # GPL-3.0-or-later（SPDX 标注同左）
 ├── README.md                 # 快速开始、语义说明（含 /commits 首次 open
 │                             # 的停顿语义，见 3.4；挂载期间禁 gc 的运维
-│                             # 提示，见 3.1）、FAQ
+│                             # 提示，见 3.1；st_ino 注册表内存上界与
+│                             # 不回收声明，见 3.2）、FAQ
 ├── CONTRIBUTING.md           # 分支/提交规范、如何跑测试
 ├── CODE_OF_CONDUCT.md
 ├── SECURITY.md               # 报告漏洞渠道
@@ -433,10 +486,15 @@ gitfs/
 │                              # 供 readdir 跳过断言使用；另含 detached
 │                              # HEAD 独有 commit（供 /commits 清单断言）
 │                              # 与 refs/remotes/origin/HEAD（供隐藏断言）、
-│                              # refs/replace/<oid>（供 replace 不生效断言）
+│                              # refs/replace/<oid>（供 replace 不生效断
+│                              # 言）、refs/notes/keep 与 refs/stash
+│                              # （供 commits 入集口径断言，对齐
+│                              # rev-list --all oracle）
 └── docs/
     ├── filesystem-semantics.md  # 对用户承诺的语义（本文 3.x 的稳定化版本；
-    │                          # 必含"gc/prune 并发"与"空仓库"两节，见 3.1）
+    │                          # 必含"gc/prune 并发""空仓库""readdir 字节
+    │                          # 字典序"三节，见 3.1、3.2；含 st_ino 注册
+    │                          # 表内存上界声明）
     └── mount.gitfs.8            # man 手册（roff；CMake install 到 $(mandir)/man8）
 ```
 
@@ -453,7 +511,15 @@ gitfs/
     边缘用例：`'.'`/`'..'` entry 在 readdir/getattr 被跳过且记警告、
     `refs/remotes/origin/HEAD` 在 `/remote` 不可见（访问 → `ENOENT`）、
     非 UTF-8 文件名按原始字节读回、含嵌入 NUL 的 symlink 截断至首个
-    NUL、detached HEAD 独有 commit 出现在 `commits` 清单中；
+    NUL、detached HEAD 独有 commit 出现在 `commits` 清单中、存在
+    blob tag 时 `commits` 仍可成功生成且含全部 commit oid（非
+    commit ref 跳过不计错，见 3.5）、`commits` 清单排序归一后与
+    `git --no-replace-objects rev-list --all` 输出一致（notes/stash
+    ref 的 commit 在列）、readdir 顺序断言（根与 branch/tag/remote/
+    tree 按分量原始字节字典序，含嵌套 ref 分组前缀与
+    `.gitfs-submodule` 合成项；oracle 以 `LC_ALL=C sort` 归一比对）、
+    超限 blob 直读（`--blob-cache-size=1` 挂载下读取大于容量的
+    blob，内容与 `git cat-file` 一致且既有缓存条目不被逐出）；
   - CI 上 `/dev/fuse` 不可用时集成测试自动 skip（标记），在自管 runner 跑全量。
 - **可观测性**：`-v/--verbose` 输出解析日志；错误信息含 oid 与 errno 上下文。
 
@@ -514,7 +580,7 @@ gitfs/
   的日期由 2025-09-24 统一为 **2026-09-24**（与仓库提交、§7.1 及 §3.6
   示例时间戳一致），man 页头注释同步更新至 Q1-Q12；(b) §3.5 清单体
   积估算限定口径——45MB 仅按 sha1（41B/行），sha256 为 65B/行
-  ≈ 74MB；(c) §3.2 子模块说明文件命名明确为 `<name>.gitfs-submodule`；
+  ≈ 74MB（该数值后经 Q16(f) 勘误为 71.5MB）；(c) §3.2 子模块说明文件命名明确为 `<name>.gitfs-submodule`；
   (d) 显式声明挂载期间外部 `git gc`/`git prune` 语义——对象被删 →
   瞬时 `ENOENT`/`EIO`，建议挂载期间禁 gc 或接受瞬态错误（见 3.1）；
   (e) 显式声明空仓库行为——挂载成功、入口为空（见 3.1）；(f)
@@ -576,3 +642,35 @@ gitfs/
   必得不同 inode；跨重挂载可复现性在冲突路径上除外（10⁶ 条目生日
   碰撞概率 ≈ 3×10⁻⁸），哈希函数可注入、单测强制碰撞断言消歧
   （见 3.2、§4）。
+
+### 7.6 收敛补全（2026-09-24，review round 1/5 跟进）
+
+- **Q16 /commits 入集口径、注册表上界、readdir 顺序、合成元数据与
+  超限 blob（已决）**：
+  (a) `/commits` 入队集合钉住：枚举 `refs/` 下**全部** ref（heads/tags/
+  remotes 之外，notes、stash、replace 等特殊命名空间一并纳入），对齐
+  `git --no-replace-objects rev-list --all` 的 oracle（实测：该集合
+  git 同样全量枚举，非 commit 目标被静默跳过）；另加 HEAD；逐个
+  peel 至 commit，peel 失败者（如轻量 tag 指向 blob/tree）跳过并记
+  verbose 日志、不算错误，绝不因个别非 commit ref 使清单生成失败或
+  退化为 `EIO`；§4 增"存在 blob tag 时 commits 仍可生成"与
+  "notes/stash ref 的 commit 在列"用例；
+  (b) `st_ino` 碰撞注册表显式声明内存上界：条目懒注册（仅实际解析过
+  的路径入表），占用 ∝ 挂载期内被触及的不同路径数，条目挂载期内
+  不回收（inode 永不复用），README 与 filesystem-semantics.md 同步
+  声明；
+  (c) readdir 顺序全域钉住为**分量原始字节字典序**：branch/tag/remote
+  与根同规则；tree 目录**重排**为字典序而非沿用 git tree 内在序
+  （目录名附加 `/` 的比较规则，与纯字节序在 `foo`/`foo.txt` 组合上
+  相反），`.gitfs-submodule` 合成项同名参与排序；§4 增顺序断言；
+  (d) 合成入口元数据补全：`commits`/`.gitfs.json` 为 `S_IFREG|0444`、
+  `nlink=1`；根与 `/branch`//`tag`//`remote`//`commit`//`/HEAD` 入口
+  目录的 mtime/ctime/atime = 挂载时刻（`nlink=2` 通用规则）；
+  (e) 超限 blob（单 blob > `--blob-cache-size`）绕过缓存直读：不插入、
+  不逐出既有条目，直读经 libgit2 + packfile mmap/内核页缓存；blob
+  装载在 3.4 单互斥下串行执行，天然 single-flight；§4 增超限 blob
+  读用例；
+  (f) 小项：`.gitfs.json` 的 `repository` 对非法 UTF-8 字节按 `%XX`
+  百分号转义（保证 JSON 合法 UTF-8）；`/commit/<oid>` 仅接受小写
+  十六进制（大写 → ENOENT）；§3.5/§7.2(b) 的 sha256 清单估算由
+  74MB 勘误为 71.5MB（65B × 110 万）。

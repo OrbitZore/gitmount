@@ -1,4 +1,4 @@
-.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q15)
+.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q16)
 .TH MOUNT.GITFS 8 "2026-09-24" "gitfs 0.1.0" "System Administration"
 .SH NAME
 mount.gitfs \- mount a git repository as a read\-only FUSE filesystem
@@ -101,7 +101,10 @@ Arbitrary commits by full object id:
 .I commit/<oid>
 where
 .I <oid>
-is 40 hex chars (sha1) or 64 (sha256), naming a commit object itself
+is 40 lowercase hex chars (sha1) or 64 (sha256) \(em uppercase hex is
+rejected with
+.B ENOENT
+\(em naming a commit object itself
 \(em no peeling, no abbreviation.
 Listing
 .I commit/
@@ -133,7 +136,13 @@ Read\-only text file listing the full oid of every commit reachable from
 all refs
 .B and
 .BR HEAD
-(including detached\-HEAD\-only commits), one per line, in deterministic
+(every ref under
+.I refs/
+, including notes, stash, and replace namespaces \(em matching
+.B "git \-\-no\-replace\-objects rev\-list \-\-all"
+\(em plus detached\-HEAD\-only commits; refs that do not peel to a
+commit, such as a lightweight tag on a blob or tree, are skipped with
+a verbose log entry and are not an error), one per line, in deterministic
 topological order
 (GIT_SORT_TOPOLOGICAL; refs are pushed in sorted ref\-name order, HEAD
 last, so the relative order of parallel commits is reproducible byte
@@ -159,6 +168,12 @@ Mount metadata: format version, absolute repository path,
 mount timestamp, and the configured cache sizes in bytes
 .RB ( cache.blob_bytes ,
 .BR cache.tree_bytes ).
+If the repository path contains bytes that are not valid UTF\-8, the
+.I repository
+field percent\-escapes them as
+.BI % XX
+(ASCII and valid multi\-byte sequences are kept verbatim) so the file
+remains valid JSON.
 It is an immutable snapshot taken at mount time and does not track later
 HEAD movement \(em use
 .I HEAD/
@@ -209,6 +224,9 @@ unknown keys are rejected by libfuse (exit status 1).
 .TP
 .BI \-\-blob\-cache\-size \ MiB
 Blob LRU cache limit in MiB (default 64).
+A single blob larger than the limit bypasses the cache and is read
+directly (nothing is evicted to make room; repeated reads fall back to
+the kernel page cache over the mmap'ed packfile).
 The value must be a positive integer; 0, negative, or unparseable
 values are usage errors (exit status 1); there is no artificial upper
 cap (bounded only by available memory).
@@ -267,6 +285,19 @@ and friends report
 queries that statx issues under SELinux).
 .SS File metadata
 Directories are 0755, plain files 0644, executables 0755, symlinks 0777.
+The synthetic files
+.I commits
+and
+.I .gitfs.json
+are mode 0444 (nlink 1); the root directory and the five entry
+directories
+.BR branch/ ,
+.BR tag/ ,
+.BR remote/ ,
+.BR commit/ ,
+and
+.I HEAD/
+report the mount time as mtime/ctime/atime (nlink 2).
 .BR st_mtime ", " st_ctime ,
 and
 .B st_atime
@@ -288,6 +319,10 @@ Hash collisions are resolved by a mount\-local registry, so two
 different paths never share an inode; remount stability holds except
 for the astronomically rare colliding paths (~3e\-8 per million
 entries).
+The registry registers paths lazily (only paths actually stat'ed or
+listed) and never frees entries during the mount, so its memory grows
+with the number of distinct paths touched and inode numbers are never
+reused.
 Equal inodes never imply hard links or shared content.
 .SS Submodules
 Rendered as an empty directory plus a sibling text file
@@ -319,6 +354,16 @@ not rewritten); entries literally named
 or
 .B ..
 are skipped.
+All directory listings (root,
+.BR branch/ ,
+.BR tag/ ,
+.BR remote/ ,
+and tree directories, including the
+.I .gitfs\-submodule
+synthetic entries) are emitted in raw\-byte lexicographic order of each
+path component (memcmp, locale\-independent); tree entries are
+re\-sorted rather than following git's intrinsic tree order (where
+directory names compare as if suffixed with '/').
 .B statfs
 reports zero free blocks and zero free inodes, so
 .B df
