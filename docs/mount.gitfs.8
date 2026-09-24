@@ -1,4 +1,4 @@
-.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q18)
+.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q19)
 .TH MOUNT.GITFS 8 "2026-09-24" "gitfs 0.1.0" "System Administration"
 .SH NAME
 mount.gitfs \- mount a git repository as a read\-only FUSE filesystem
@@ -255,6 +255,20 @@ blobs), the same way a first
 .I commits
 .B open
 waits for its revwalk.
+Cache\-miss loads of cacheable blobs use the same split (lookup plus
+double\-check under the lock, decompression outside it, recheck before
+inserting), so the lock is never held across a whole\-blob decompression
+however large the cache is; concurrent first loads of the same blob may
+transiently decompress twice (the loser's block is discarded).
+The oversize test itself \-\- and every reported blob
+.BR st_size \-\-
+comes from a header\-only ODB read
+.RB ( git_odb_read_header ),
+so
+.B stat
+never triggers a blob decompression, just as it never triggers the
+.I commits
+revwalk.
 The memory footprint of oversized blobs is the sum of their sizes
 across concurrently open handles.
 The value must be a positive integer; 0, negative, or unparseable
@@ -280,8 +294,12 @@ is consumed by
 itself and never forwarded, so there is no ambiguity.
 .TP
 .BR \-v ", " \-\-verbose
-Log path resolution, cache hits, and oversized\-blob decompression
-events (one line per full decompression) to stderr.
+Log path resolution, cache hits, and blob decompression events to
+stderr (one line per full decompression, covering both oversized
+open\-pin decompressions and cache\-miss LRU loads; a plain
+.B "ls \-l"
+produces no decompression lines since blob sizes are read from ODB
+headers only).
 .TP
 .BR \-n ", " \-s
 Accepted and ignored (no\-mtab / sloppy flags forwarded by
@@ -343,6 +361,15 @@ still reports size 0; after a fingerprint rebuild, stat reports the
 current cached version's time),
 .I .gitfs.json
 the mount time.
+Blob
+.B st_size
+is obtained from a header\-only ODB read
+.RB ( git_odb_read_header ),
+never from a full decompression: stat'ing a directory that contains
+multi\-GB blobs costs no more than a header lookup, just as getattr
+never triggers the
+.I commits
+revwalk.
 .PP
 .B st_ino
 is a 64\-bit hash of the full path.
