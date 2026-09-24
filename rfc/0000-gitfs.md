@@ -673,7 +673,9 @@ owner/group 不得写 noexec 存在性断言。直连调用时出现在 `-o`
                        （mount(8) 的 -v 映射至此）
   -n / -s / -N <ns>    mount(8) 转交的 no-mtab / sloppy / namespace 标志：
                        容忍并忽略（助手契约为 [-sfnv] [-N namespace]
-                       [-o options] [-t type.subtype]，--namespace 时助手收到 -N <ns>，
+                       [-o options] [-t type.subtype]，-t gitfs 接受记
+                       verbose、其余值退出 1（Q26a，见上），--namespace
+                       时助手收到 -N <ns>，
                        Q22b——本机 mount(8) 在 exec 前拒绝切 namespace，
                        该转交路径依 man 页契约文档化；-s 仅指标志本身
                        被容忍、不放松未知 -o 键拒绝——mount(8) 文档
@@ -790,7 +792,7 @@ gitfs/
     `refs/remotes/origin/HEAD` 在 `/remote` 不可见（访问 → `ENOENT`）、
     嵌套 ref 分组/命名空间目录（`/branch/feature`、`/remote/origin`）
     的元数据断言：mode 0755、nlink=2、mtime/ctime/atime = 挂载时刻
-    （与入口目录同口径、非 committer time），及根与 tree 目录
+    （与入口目录同口径、非 committer time），及根、分组与 tree 目录
     `st_size`=4096（Q26b/Q26d）、
     非 UTF-8 文件名按原始字节读回、含嵌入 NUL 的 symlink 截断至首个
     NUL、detached HEAD 独有 commit 出现在 `commits` 清单中、存在
@@ -1335,7 +1337,9 @@ gitfs/
   为 `<src> <dir> -o rw -t <type.subtype>`，无点则恒不出现）在
   §3.7 的契约引用中缺位；`gitfs` 无点、经 mount(8) 的正常路径永不
   触发，但 §3.7 自称对助手契约逐条核验穷尽，缺该子句即非穷尽。
-  修订：§3.7 契约引用与帮助文本内联契约补全语法；钉住处理——收到
+  修订：§3.7 契约引用与帮助文本内联契约补全语法（帮助文本并内联
+  -t 处理半句——-t gitfs 接受记 verbose、其余值退出 1——使该
+  CLI 面自包含，不必回正文即可裁决）；钉住处理——收到
   `-t gitfs`（仅可能经直连调用出现）接受并记 verbose 一条（冗余
   自指），其余任何值（含 `gitfs.<x>` 带点形态——用户
   `mount -t gitfs.<x>` 时 libmount 确会 exec `mount.gitfs` 并转交该
@@ -1348,8 +1352,9 @@ gitfs/
   getattr 语义一致"未钉 mode/nlink/mtime，实现者可能自取 committer
   time 或运行时时钟。钉住：`S_IFDIR|0755`、`nlink=2`、
   `st_mtime/ctime/atime` = 挂载时刻（与入口目录同口径、非 tree 目录
-  不取 committer time）；§3.1/§3.2 钉住、§4 增一条断言、man 页
-  File metadata 同步；
+  不取 committer time）；§3.1/§3.2 钉住、§4 增一条断言（st_size
+  断言点名根、分组与 tree 目录，与 §3.2 全部目录统一口径对齐）、
+  man 页 File metadata 同步；
   (c) **仅含隐藏 HEAD 的远端命名空间（小）**：`refs/remotes/
   <remote>/` 下仅有隐藏的 HEAD 符号引用时，`/remote/<remote>` 的
   渲染（抑制 vs 空目录）原无口径。钉住：命名空间存在性以 refdb 为
