@@ -2,7 +2,7 @@
 
 - RFC 编号: 0000
 - 标题: gitfs — read-only git-to-FUSE 文件系统
-- 状态: Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6、§7.7）
+- 状态: Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6、§7.7、§7.8）
 - 日期: 2026-09-24
 - 目标版本: 0.1.0
 
@@ -233,7 +233,7 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 |---|---|
 | `getattr` | 路径 → 对象（3.1），失败 `ENOENT`；`commits` 恒为纯缓存读（未生成时 `st_size=0`），**不**触发 revwalk 或指纹重算（见 3.5） |
 | `readdir` | 根：固定列表；`branch/tag/remote`：枚举 ref（含 `/` 的名字按目录分组）；`commit`：**恒为空**；tree：枚举 entries（含 `.gitfs-submodule` 合成项）——全部目录（含根）的输出顺序一律按分量原始字节字典序（见 3.1）。注册 `opendir/releasedir`：枚举列表快照挂于 `fi->fh`，保证单目录流内 offset 续读稳定（fuse3 要求），跨目录流实时反映 ref 变化 |
-| `open`/`release` | 仅校验 `O_RDONLY` 系标志（写标志 → `EROFS`，与内核对 ro 挂载的判定一致）；`commits` 首次 `open` 触发生成（见 3.5），且把当前缓冲版本**钉住于 `fi->fh`**——同一次 open 的所有 read 分片读自同一快照，refs 中途变化不影响（与 readdir 的目录流快照同构），`release` 时解除钉住；超限 blob（大于 `--blob-cache-size`）的 `open` 同构 open-pin：一次性 lookup + 全量解压，解压块钉住于 `fi->fh`、`release` 释放（见 3.5）；`.gitfs.json` 挂载期内不可变，无需钉住 |
+| `open`/`release` | 仅校验 `O_RDONLY` 系标志（写标志 → `EROFS`，与内核对 ro 挂载的判定一致）；`commits` 首次 `open` 触发生成（见 3.5），且把当前缓冲版本**钉住于 `fi->fh`**——同一次 open 的所有 read 分片读自同一快照，refs 中途变化不影响（与 readdir 的目录流快照同构），`release` 时解除钉住；超限 blob（大于 `--blob-cache-size`）的 `open` 同构 open-pin：一次性 lookup（单互斥内）+ 全量解压（锁外执行，不阻塞全挂载其他请求），解压块钉住于 `fi->fh`、`release` 释放（见 3.5/Q18a）；`.gitfs.json` 挂载期内不可变，无需钉住 |
 | `read` | 定位 blob（可缓存者经 LRU 缓存；超限者读 open 时钉住的解压块，见 3.5），拷贝 `[offset, offset+size)` 越界截断；合成文件（`commits`、`.gitfs.json`、`.gitfs-submodule`）为整块只读缓冲，`commits` 读 open 时钉住的版本 |
 | `readlink` | symlink blob 内容；内容含嵌入 NUL 时**截断至首个 NUL**（内核 symlink 目标不可含 NUL；与 `git checkout` 的事实行为一致，显式同语义而非 `EIO`）；空 blob → 返回长度 0 的空目标；超过 PATH_MAX → `ENAMETOOLONG` |
 | `statfs` | 汇报本地 ODB 占用为 `f_blocks`（全部 packfile 字节 + loose 对象字节；alternates 指向的外部存储不计入，启用 alternates 时 verbose 日志提示），块大小 4KiB；`f_bfree = f_bavail = 0`——只读卷惯例是 0 空闲，`df` 显示 100% 已用，向用户明确传达"无任何可写空间"（若报全量可用，`df` 会显示 0% 已用，易误导）；`f_files = f_ffree = 0`（精确 inode 计数需全量遍历，v0.1 不承诺，内核与 `df` 均容忍 0） |
@@ -264,6 +264,11 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   "已生成且指纹一致"后才启动 revwalk，其余并发 open 阻塞等待同一次
   生成完成后直接复用缓冲；不做两个 revwalk 同时跑的浪费，也不存在
   缓冲交换竞态（读方拿到的 `fi->fh` 引用自始有效）。
+- **超限 blob 全量解压同为例外（Q18a）**：open 时单互斥内仅做
+  `git_blob` lookup/句柄获取，全量解压在**锁外**执行——解压块只归
+  该 open 的句柄所有、无共享可变状态，与上述让锁引用同一安全性
+  依据（libgit2 1.x 同 repository 并发只读）；避免数 GB blob 解压
+  期间阻塞全挂载（见 3.5）。
 - RAII 封装所有 libgit2 句柄（`git_repository`、`git_tree`、`git_blob`…），
   自定义 deleter 的 `std::unique_ptr` 别名，异常安全，热路径无异常。
 - `SIGINT`/`SIGTERM` → `fuse_session_exit` 优雅卸载；同时支持 `umount` 外部卸载。
@@ -277,10 +282,19 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   时机）**：单个 blob 大于当前 `--blob-cache-size` 时**不插入缓存、
   也不触发既有条目逐出**（为单个超限对象清空整池只会引起缓存抖动）。
   其解压时机钉住为**与 `commits` 同构的 open-pin**（见 3.3）：
-  `open` 时在 3.4 的单互斥下完成一次 `git_blob` lookup 与**全量
-  解压**，解压后字节块（git_blob 句柄的 rawdata）钉住于 `fi->fh`，
-  该 open 内所有 read 分片直接自该块切片拷贝，`release` 时释放——
-  单次 open 的顺序分片读**只解压一次**。逐 read 重做 lookup+全量
+  `open` 时完成一次 `git_blob` lookup 与**全量解压**，解压后字节块
+  （git_blob 句柄的 rawdata）钉住于 `fi->fh`，该 open 内所有 read
+  分片直接自该块切片拷贝，`release` 时释放——单次 open 的顺序
+  分片读**只解压一次**。**锁边界（Q18a）**：单互斥内仅做 lookup/
+  句柄获取，**全量解压移至锁外执行**——数 GB blob 解压需数秒，
+  若整段持锁则全挂载停摆，与 3.4 专设分 chunk 让锁的动机相悖；
+  解压块仅归该 open 的句柄所有、无共享可变状态，让锁窗口内其他
+  线程只做同 repository 的并发只读，libgit2 1.x 已保证安全（与
+  3.4 让锁引用同一依据）。代价是该 open 自身的返回时间仍与全量
+  解压同阶（数 GB → 数秒，调用方需预期），该等待语义与 `commits`
+  首次 open 同构，README 中声明；每次全量解压记一条 verbose 日志
+  （解压计数），为“只解压一次”提供直接可观测钩子（§4 断言用）。
+  逐 read 重做 lookup+全量
   解压的字面直读会使大 blob 顺序分片读呈 O(size²) 解压放大，故
   不采用：blob per-type 缓存已写死 0（见下）、自家 LRU 又不收
   超限对象，每次 read 必然重新解压；且解压结果不在内核页缓存
@@ -291,11 +305,13 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   数 × blob 大小”量级），由调用方自行控制；v0.1 不做跨 open
   引用计数共享，流式按需解压（解压块不整块驻留）留作后续优化。
   open 时装载失败的错误按 3.3 映射返回（对象被外部 gc 删除 →
-  `ENOENT`、pack 中途失效 → `EIO`），不产生钉住句柄。**并发装载
-  天然 single-flight**：blob 装载（可缓存装载与超限的一次性解压）
-  均在 3.4 的单互斥下串行执行——可缓存 blob 由首个装载线程填充、
-  其余线程命中复用；不存在同一 blob 的重复并发解压或缓存竞态，
-  无需额外协调结构。
+  `ENOENT`、pack 中途失效 → `EIO`），不产生钉住句柄。**可缓存
+  装载在锁内 single-flight（Q18a 收窄口径）**：可缓存 blob 的
+  LRU 装载在 3.4 的单互斥下串行执行——首个装载线程填充、其余
+  线程命中复用，不存在同一 blob 的重复并发解压或缓存竞态；超限
+  blob 的解压已移至锁外（见上），并发打开同一超限 blob 时各
+  open 并行解压各自的块——与“按 open 独立持有”的内存峰值口径
+  自洽、不引入新峰值，亦无需额外协调结构。
 - **tree/commit 依赖 libgit2 内置对象缓存，init 时显式调参**：默认 per-type
   上限仅 4KiB（源码 `cache.c` 的 `git_cache__max_object_size[]`），序列化
   超线的大目录 tree（~100+ entry 即超）不进缓存；而高层 fuse API 每个
@@ -445,7 +461,9 @@ mount(8) 按助手约定转交 `-n/-s/-v/-r/-w` 标志与 `-o` 选项串；fstab
                        （见 3.5、Q13）
   --foreground / -f    前台运行（默认守护进程化）；mount(8) 的 --fake
                        由其自身消化、不会转交助手，-f 无歧义
-  --verbose / -v       输出路径解析与缓存命中日志（mount(8) 的 -v 映射至此）
+  --verbose / -v       输出路径解析与缓存命中日志，及超限 blob 全量
+                       解压事件（每次解压一条，即解压计数，见 3.5）
+                       （mount(8) 的 -v 映射至此）
   -n / -s              mount(8) 转交的 no-mtab / sloppy 标志：容忍并忽略
   -r / -w              mount(8) 转交的只读/读写标志：-r 接受（默认即 ro），
                        -w 报错退出 1（只读文件系统）
@@ -481,9 +499,11 @@ gitfs/
 │                             # install: $(sbindir)/mount.gitfs + $(mandir)/man8
 ├── LICENSE                   # GPL-3.0-or-later（SPDX 标注同左）
 ├── README.md                 # 快速开始、语义说明（含 /commits 首次 open
-│                             # 的停顿语义，见 3.4；挂载期间禁 gc 的运维
-│                             # 提示，见 3.1；st_ino 注册表内存上界与
-│                             # 不回收声明，见 3.2）、FAQ
+│                             # 的停顿语义，见 3.4；超限 blob open 的
+│                             # 等待语义与锁外解压不阻塞他请求声明，
+│                             # 见 3.5；挂载期间禁 gc 的运维提示，
+│                             # 见 3.1；st_ino 注册表内存上界与不回收
+│                             # 声明，见 3.2）、FAQ
 ├── CONTRIBUTING.md           # 分支/提交规范、如何跑测试
 ├── CODE_OF_CONDUCT.md
 ├── SECURITY.md               # 报告漏洞渠道
@@ -551,8 +571,13 @@ gitfs/
     超限 blob 直读（`--blob-cache-size=1` 挂载下读取大于容量的
     blob，顺序分片整读、内容逐块与 `git cat-file` 一致且既有缓存
     条目不被逐出；open-pin 语义保证单次顺序读只解压一次——以
-    “整读耗时不随分片数平方增长”的宽松比值断言在自管 runner 上
-    作参考检查（共享 runner 抖动大，不作门禁），见 3.5/Q17a）；
+    **verbose 日志的解压计数 = 1** 直接断言（每次全量解压记一条
+    `-v` 日志，见 3.5/Q18b；耗时比值断言只能抓 O(n²) 回归，计数
+    断言补足其无法排除多次解压的盲区），另以“整读耗时不随分片
+    数平方增长”的宽松比值断言在自管 runner 上作参考检查（共享
+    runner 抖动大，不作门禁），见 3.5/Q17a；锁外解压另设可选
+    参考断言：超限 blob open 解压期间并发的根 readdir 不被长时
+    间阻塞（自管 runner、宽松阈值），见 3.4/Q18a）；
   - CI 上 `/dev/fuse` 不可用时集成测试自动 skip（标记），在自管 runner 跑全量。
 - **可观测性**：`-v/--verbose` 输出解析日志；错误信息含 oid 与 errno 上下文。
 
@@ -703,7 +728,8 @@ gitfs/
   不逐出既有条目；解压时机经 §7.7(a) 细化为 open-pin 一次性解压
   （原“逐 read 直取、内核页缓存兜底”表述不能消除重复解压，§3.5
   已相应修订）；blob 装载在 3.4 单互斥下串行执行，天然
-  single-flight；§4 增超限 blob 读用例；
+  single-flight（该口径经 §7.8(a) 收窄为可缓存装载，超限解压
+  移至锁外）；§4 增超限 blob 读用例；
   (f) 小项：`.gitfs.json` 的 `repository` 对非法 UTF-8 字节按 `%XX`
   百分号转义（保证 JSON 合法 UTF-8）；`/commit/<oid>` 仅接受小写
   十六进制（大写 → ENOENT）；§3.5/§7.2(b) 的 sha256 清单估算由
@@ -713,8 +739,9 @@ gitfs/
 
 - **Q17 超限 blob 解压时机、非 tag 入口 peel 口径与文档勘误（已决）**：
   (a) 超限 blob（单 blob > `--blob-cache-size`）的直读钉住为
-  **open-pin 一次性解压**：`open` 时在单互斥下一次 `git_blob`
-  lookup + 全量解压，解压块钉住于 `fi->fh`、`release` 释放——与
+  **open-pin 一次性解压**：`open` 时一次 `git_blob` lookup +
+  全量解压（锁边界经 §7.8(a) 细化：lookup 在单互斥内、全量解压
+  移至锁外），解压块钉住于 `fi->fh`、`release` 释放——与
   `commits` 的 open-pin 同构，单次 open 的顺序分片读只解压一次，
   消除逐 read 重解压的 O(size²) 放大；内核页缓存只覆盖 mmap 的
   pack 原始字节、不含解压结果，不能作为免重解压的依据（§3.5
@@ -730,3 +757,26 @@ gitfs/
   (d) §4 增用例：非 commit 目标分支入口 `ENOENT`、超限 blob 顺序
   分片整读（内容逐块比对 + “整读耗时不随分片数平方增长”的参考
   断言，见 §4）。
+
+### 7.8 锁分段与解压可观测性（2026-09-24，review round 3/5 跟进）
+
+- **Q18 超限 blob open-pin 的锁边界与解压计数（已决）**：
+  (a) §7.7(a) 的超限 blob open-pin 细化**锁分段**：单互斥内仅完成
+  `git_blob` lookup/句柄获取，**全量解压移至锁外执行**——数 GB blob
+  解压需数秒，整段持锁会让全挂载停摆，与 §3.4 专设分 chunk 让锁的
+  动机相悖；解压块仅归该 open 的句柄所有、无共享可变状态，让锁窗口
+  内其他线程只做同 repository 的并发只读，libgit2 1.x 已保证安全
+  （§3.4 让锁引用同一依据）。并发打开同一超限 blob 时各 open 并行
+  解压各自的块，与 §7.7(a) 已声明的按 open 独立持有、内存峰值 =
+  Σ 各 open 所持大小的口径自洽，不引入新峰值；single-flight 口径
+  相应收窄为可缓存 blob 的 LRU 装载（锁内首个线程填充、其余命中
+  复用，§7.6(e) 同步修订）。该 open 自身的返回时间仍与全量解压
+  同阶（数 GB → 数秒，调用方需预期），等待语义与 `commits` 首次
+  open 同构，README 同步声明；§4 增可选参考断言“超限 blob open
+  解压期间并发请求（根 readdir）不被长时间阻塞”（自管 runner、
+  宽松阈值）；
+  (b) 可观测性：每次超限 blob 全量解压记一条 verbose 日志（解压
+  计数），集成测试断言“单次 open 顺序整读 → 解压计数 = 1”——
+  直接断言“只解压一次”，补足 §7.7(d) 耗时比值断言只能抓 O(n²)
+  回归、无法排除多次解压的盲区；man 页 `--blob-cache-size` 与
+  `-v` 描述同步。

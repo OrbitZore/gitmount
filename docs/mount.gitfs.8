@@ -1,4 +1,4 @@
-.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q17)
+.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q18)
 .TH MOUNT.GITFS 8 "2026-09-24" "gitfs 0.1.0" "System Administration"
 .SH NAME
 mount.gitfs \- mount a git repository as a read\-only FUSE filesystem
@@ -245,6 +245,16 @@ of the open, and
 .B release
 frees it, so a sequential read decompresses exactly once (nothing is
 evicted to make room).
+Only the object lookup is performed under gitfs's internal lock; the
+full decompression runs outside it, so other requests on the mount are
+not stalled while it runs.
+The
+.B open
+itself still waits for the whole decompression (seconds for multi-GB
+blobs), the same way a first
+.I commits
+.B open
+waits for its revwalk.
 The memory footprint of oversized blobs is the sum of their sizes
 across concurrently open handles.
 The value must be a positive integer; 0, negative, or unparseable
@@ -270,7 +280,8 @@ is consumed by
 itself and never forwarded, so there is no ambiguity.
 .TP
 .BR \-v ", " \-\-verbose
-Log path resolution and cache hits to stderr.
+Log path resolution, cache hits, and oversized\-blob decompression
+events (one line per full decompression) to stderr.
 .TP
 .BR \-n ", " \-s
 Accepted and ignored (no\-mtab / sloppy flags forwarded by
