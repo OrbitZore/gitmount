@@ -1,4 +1,4 @@
-.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q13)
+.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q14)
 .TH MOUNT.GITFS 8 "2026-09-24" "gitfs 0.1.0" "System Administration"
 .SH NAME
 mount.gitfs \- mount a git repository as a read\-only FUSE filesystem
@@ -134,7 +134,10 @@ all refs
 .B and
 .BR HEAD
 (including detached\-HEAD\-only commits), one per line, in deterministic
-topological order.
+topological order
+(GIT_SORT_TOPOLOGICAL; refs are pushed in sorted ref\-name order, HEAD
+last, so the relative order of parallel commits is reproducible byte
+for byte).
 It is generated lazily on first
 .BR open ;
 before that
@@ -175,11 +178,12 @@ and
 semantics and validation as the corresponding long options; specifying
 the same key more than once (long option and \-o combined) is a usage
 error.
-Keys synonymous with the hardcoded security baseline
+Keys synonymous with the hardcoded baseline
 .RB ( ro ,
 .BR nosuid ,
 .BR nodev ,
-.BR default_permissions )
+.BR default_permissions ,
+.BR use_ino )
 are accepted as redundant no\-ops; their reverse counterparts
 .RB ( rw ,
 .BR suid ,
@@ -244,6 +248,15 @@ the mount is
 .B ro\ +\ nosuid\ +\ nodev
 and the kernel performs standard permission checks
 .RB ( default_permissions ).
+.SS Extended attributes
+No xattr operation is registered, so
+.BR getxattr ,
+.BR listxattr ,
+and friends report
+.B ENOTSUP
+(including the
+.I security.*
+queries that statx issues under SELinux).
 .SS File metadata
 Directories are 0755, plain files 0644, executables 0755, symlinks 0777.
 .BR st_mtime ", " st_ctime ,
@@ -255,6 +268,10 @@ of tree content are all the committer time of the underlying commit
 carries its generation time,
 .I .gitfs.json
 the mount time.
+.PP
+.B st_ino
+is a 64\-bit hash of the full path (stable across remounts; equal
+inodes never imply hard links or shared content).
 .SS Submodules
 Rendered as an empty directory plus a sibling text file
 .IR <name>\.gitfs\-submodule
@@ -296,10 +313,17 @@ alternates excluded).
 .BR branch/ ", " tag/ ", and " remote/
 listings reflect external repository changes (new commits, tags, deleted
 branches) without remounting.
-Kernel attribute and entry cache timeouts default to 0 to avoid stale
-entries; users who know the repository will not change during a mount
-may opt in with
-.BR \-o\ kernel_cache .
+Kernel attribute and entry cache timeouts are pinned to 0 to avoid stale
+entries.
+Users who know the repository will not change during a mount may opt in
+with
+.BR \-o\ kernel_cache ,
+which affects only data page caching (read/mmap); attribute and entry
+timeouts remain 0, and a metadata staleness window requires additionally
+passing
+.B attr_timeout
+or
+.BR entry_timeout .
 .SS Empty repositories
 A repository with no refs and an unborn
 .B HEAD
@@ -333,6 +357,16 @@ that request transiently fails with
 (pack invalidated mid\-read), and recovers once gc finishes;
 .B gitfs
 does not promise a stable object set for the lifetime of a mount.
+If a first\-time
+.I commits
+generation hits this mid\-revwalk, that
+.B open
+fails with
+.BR EIO ;
+the partial buffer is not cached and the fingerprint is left untouched,
+so the next
+.B open
+retries from scratch.
 When transient errors are unacceptable, disable automatic gc for the
 duration of the mount
 .RB ( git\ config\ gc.auto\ 0 ).

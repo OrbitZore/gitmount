@@ -2,7 +2,7 @@
 
 - RFC 编号: 0000
 - 标题: gitfs — read-only git-to-FUSE 文件系统
-- 状态: Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3）
+- 状态: Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4）
 - 日期: 2026-09-24
 - 目标版本: 0.1.0
 
@@ -94,7 +94,9 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
                            annotated tag/tree/blob 的 oid → ENOENT
 /commits                 → 只读文件：全部可达 commit（可达自 refs
                            与 HEAD）的完整 oid，每行一条，
-                           拓扑序（保证确定性）；不支持短前缀解析，用户
+                           拓扑序（确定性实现钉住在 3.5：
+                           GIT_SORT_TOPOLOGICAL + 排序入队）；不支持
+                           短前缀解析，用户
                            自行 `grep ^<前缀> commits` 检索
 ```
 
@@ -138,7 +140,9 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 - **挂载期间的外部 `git gc`/`git prune`**：gitfs 不加锁、不阻止任何外部
   git 操作。若 gc 重写 pack 或 prune 删除了后续请求仍需要的对象，该请求
   瞬时返回 `ENOENT`（对象消失）或 `EIO`（pack 中途失效），gc 结束后即
-  恢复；gitfs 不承诺挂载期内对象集不变。运维建议：挂载期间禁用自动
+  恢复；gitfs 不承诺挂载期内对象集不变。`commits` 清单生成期间命中
+  同一口径：revwalk 中途失败的那次 `open` 返回 `EIO`、半成品不缓存、
+  下次 `open` 重试（见 3.5）。运维建议：挂载期间禁用自动
   gc（`git config gc.auto 0`）或接受上述瞬态错误（README 与
   filesystem-semantics.md 中声明，见 §4）。
 
@@ -159,6 +163,13 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   快照语义，避免逐次 stat 漂移干扰 rsync 类工具；主流发行版 `relatime`
   挂载下内核本就不强制刷新 atime，用户无感知。
 - `st_nlink`：目录为 2，文件为 1（简化，不做精确统计）。
+- `st_ino`：由完整 VFS 路径字节的 64 位稳定哈希派生（`branch/`、
+  `commits`、`.gitfs.json` 等合成入口同口径，根固定为 FUSE_ROOT_ID=1），
+  跨重挂载确定，`tar`/`find -inum`/`diff` 等工具得到可复现的 inode。
+  **刻意不做 oid 派生**——同一 blob 出现在多个 ref 路径下若共享 inode，
+  会被 `tar -c`/`rsync -H` 误判为硬链接；路径派生保证不同路径必得不同
+  inode，且 inode 相等**不**承诺内容同一（本文件系统无硬链接语义）。
+  挂载基线因此增补 `use_ino`（见 3.7），由 gitfs 填充该派生值。
 - `st_uid`/`st_gid`：挂载进程的 uid/gid（fuse 默认行为）。
 - 合成文件的 `st_mtime`：`commits` 为其生成时刻；`.gitfs-submodule` 为所属
   commit 的 committer time（内容确定性派生自树，避免逐次 stat 漂移）；
@@ -178,7 +189,7 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 | `read` | 定位 blob（经 LRU 缓存），拷贝 `[offset, offset+size)` 越界截断；合成文件（`commits`、`.gitfs.json`、`.gitfs-submodule`）为整块只读缓冲，`commits` 读 open 时钉住的版本 |
 | `readlink` | symlink blob 内容；内容含嵌入 NUL 时**截断至首个 NUL**（内核 symlink 目标不可含 NUL；与 `git checkout` 的事实行为一致，显式同语义而非 `EIO`）；空 blob → 返回长度 0 的空目标；超过 PATH_MAX → `ENAMETOOLONG` |
 | `statfs` | 汇报本地 ODB 占用为 `f_blocks`（全部 packfile 字节 + loose 对象字节；alternates 指向的外部存储不计入，启用 alternates 时 verbose 日志提示），块大小 4KiB；`f_bfree = f_bavail = 0`——只读卷惯例是 0 空闲，`df` 显示 100% 已用，向用户明确传达"无任何可写空间"（若报全量可用，`df` 会显示 0% 已用，易误导）；`f_files = f_ffree = 0`（精确 inode 计数需全量遍历，v0.1 不承诺，内核与 `df` 均容忍 0） |
-| 其余（`mknod/mkdir/write/…`） | 返回 `EROFS` 或不注册（fuse3 只读挂载兜底） |
+| 其余（`mknod/mkdir/write/…`） | 返回 `EROFS` 或不注册（fuse3 只读挂载兜底）；**xattr 族**（`getxattr/setxattr/listxattr/removexattr`）一律不注册 → libfuse 缺省 `ENOSYS`，内核标记“无 xattr”后统一向用户态报 `ENOTSUP`（SELinux 等环境的 `security.*`/statx 附加字段查询命中此路径，干净短路而非逐次回环） |
 
 错误映射：libgit2 错误码 → `ENOENT`（对象/分支不存在；oid 格式非法也统一
 `ENOENT`，不向调用方暴露内部规则）、`EIO`（ODB 损坏）、`ENAMETOOLONG`
@@ -240,7 +251,18 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   的宣称一致，即可达集 = refs ∪ HEAD；`refs/remotes/<remote>/HEAD`
   符号引用跳过——其目标分支本身已在枚举集合内，可达集不变），整块缓存；
   以 refs 指向集合**加 HEAD 指向**的指纹为失效键，任一变化才重建。
-  revwalk 按 3.4 的分 chunk 锁策略执行，生成期间不长期阻塞其他请求。**生成与指纹比对只发生在 `open`**：生成前 `getattr` 报告
+  **拓扑序确定性的实现钉住**：walker 设 `GIT_SORT_TOPOLOGICAL`，且入队
+  序固定——收集到的完整 ref 名列表按字典序显式排序后逐个 push（不
+  依赖 refdb 迭代器内部顺序），HEAD 恒最后入队；拓扑约束之外的并列
+  commit（互不为祖先的平行链）出队次序由该入队序唯一决定，清单跨
+  进程、跨重挂载逐字节可复现。
+  **生成失败的 open 语义**：revwalk 中途因对象被外部 gc/prune 删除而
+  失败（`git_revwalk_next` 返回错误）时，该次 `open` 返回 `EIO`，
+  半成品缓冲丢弃、不写入缓存、指纹不更新（等同“从未生成过”），
+  single-flight 等待方收到同一失败；下一次 `open` 从头重试，gc
+  结束后即成功——与 3.1 的瞬态错误口径一致。
+  revwalk 按 3.4 的分 chunk 锁策略执行，生成期间不长期阻塞其他请求。
+  **生成与指纹比对只发生在 `open`**：生成前 `getattr` 报告
   `st_size = 0`，故 `ls -l`/`stat`/文件管理器枚举不触发秒级 revwalk，与
   3.1 将 `/commit` readdir 置空的同一理由保持一致；生成后 `st_size` 为
   真实值。单次 open 经 `fi->fh` 钉住缓冲版本直至 release（见 3.3），跨
@@ -252,7 +274,11 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 - FUSE 侧默认 **不开启 kernel_cache**：显式置 `attr_timeout=0、
   entry_timeout=0`（注意 fuse3 默认值均为 1s，不显式置 0 则有 1 秒陈旧窗口）：
   ref 是可变的（分支可能被删），正确性优先；提供 `-o kernel_cache` 透传给
-  高级用户在"仓库挂载期间不变化"场景下自行开启。blob 不可变，内核页缓存
+  高级用户在“仓库挂载期间不变化”场景下自行开启。澄清：`kernel_cache`
+  **只作用于数据页缓存**（read/mmap 页跨 open 复用），开启它**不**改变
+  attr/entry timeout（仍恒 0，元数据每次穿透）；想要元数据陈旧窗口须
+  另行显式传 `attr_timeout`/`entry_timeout`（与 `kernel_cache` 相互独立，
+  一致性风险自担）。blob 不可变，内核页缓存
   对 `mmap` 的收益不受影响。
 - 预期性能目标与 CI 门禁：以**比值阈值**为主——`grep -r` 全树吞吐不低于
   `git archive | tar -x` 的 50%；冷缓存 `cat` 单文件耗时不超过同机
@@ -309,9 +335,10 @@ mount(8) 按助手约定转交 `-n/-s/-v/-r/-w` 标志与 `-o` 选项串；fstab
                        tree-cache-size=<MiB>（连字符与下划线拼法等价），
                        与同名长选项语义、校验完全一致，同一键重复给出
                        （含与长选项混用）→ 参数错误退出 1；与硬编码基线
-                       同义的键（ro/nosuid/nodev/default_permissions）
+                       同义的键（ro/nosuid/nodev/default_permissions/
+                       use_ino）
                        接受为冗余无操作，反向键（rw/suid/dev）报错退出
-                       1，防安全基线被 CLI 稀释或顶掉（Q10/Q13）；其余
+                       1，防安全基线被 CLI 稀释或顶掉（Q10/Q13/Q14）；其余
                        键原样透传 libfuse 选项解析器（如 kernel_cache；
                        allow_other 需 /etc/fuse.conf 启用
                        user_allow_other），未知键由 libfuse 拒绝 → 退出 1
@@ -332,7 +359,8 @@ mount(8) 按助手约定转交 `-n/-s/-v/-r/-w` 标志与 `-o` 选项串；fstab
 ```
 
 - 挂载选项硬编码基线：`ro,fsname=gitfs,default_permissions,subtype=gitfs,
-  nosuid,nodev`。
+  nosuid,nodev,use_ino`（`use_ino` 令内核采用 gitfs 填充的路径派生
+  `st_ino`，见 3.2）。
 - 卸载：`umount <mountpoint>`（或 `fusermount3 -u`）；守护进程收到
   `SIGINT`/`SIGTERM` 亦优雅退出（见 3.4）。
 - 退出码：0 正常卸载；1 参数错误；2 仓库不可读/不是 git 仓库；3 挂载失败。
@@ -490,3 +518,23 @@ gitfs/
   反向键（rw/suid/dev）仍报错退出 1；(d) `.gitfs.json` 的 `cache_bytes`
   扩展为 `cache` 对象（blob/tree 双口径字节，见 3.6）；(e) man 页更名
   `docs/mount.gitfs.8`（man8 章节，mount 助手惯例），头注释同步 Q1-Q13。
+
+### 7.4 定稿补全（2026-09-24，定稿前 review 跟进）
+
+- **Q14 inode、清单确定性与瞬态失败语义（已决）**：(a) `st_ino` 由完整
+  VFS 路径字节的 64 位稳定哈希派生（合成入口同口径、根固定为 1），跨
+  重挂载确定；**不**按 oid 派生，防止 `tar`/`rsync -H`/`diff` 把多个
+  ref 路径下的同一 blob 误判为硬链接；挂载基线增补 `use_ino`，`-o`
+  同义冗余键名单相应补入（见 3.2、3.7）；(b) `commits` 拓扑序的确定性
+  钉住实现：`GIT_SORT_TOPOLOGICAL` + 完整 ref 名字典序排序入队
+  （HEAD 恒最后），并列 commit 出队次序由入队序唯一决定，清单跨重
+  挂载逐字节可复现（见 3.1、3.5）；(c) `commits` 生成期间对象被
+  gc/prune 删除致 revwalk 中途失败：该次 `open` 返回 `EIO`、半成品
+  不缓存、指纹不更新、下次 `open` 重试，与 3.1 瞬态错误口径一致
+  （见 3.1、3.5）；(d) xattr 族（get/set/list/remove）不注册 →
+  `ENOTSUP`，SELinux 环境 statx 的 `security.*` 查询命中即干净短路
+  （见 3.3）；(e) `-o kernel_cache` 澄清：仅影响数据页缓存，
+  attr/entry timeout 仍恒 0，元数据陈旧窗口须另显式传
+  `attr_timeout`/`entry_timeout`（见 3.5）。
+- （记账）round 3 仅为 §4 ASCII 目录树第 349 行对齐微修（提交
+  8e0e57d），无决议内容，补记于此。
