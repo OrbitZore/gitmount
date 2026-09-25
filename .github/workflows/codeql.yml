@@ -24,20 +24,20 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config cmake ninja-build \
             libfuse3-dev libgit2-dev
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@1190a975f95c # v3
+        uses: github/codeql-action/init@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
         with:
           languages: cpp
           queries: security-extended
       - name: Build
-        uses: github/codeql-action/autobuild@1190a975f95c # v3
+        uses: github/codeql-action/autobuild@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@1190a975f95c # v3
+        uses: github/codeql-action/analyze@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
         with:
           category: '/language:cpp'

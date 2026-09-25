@@ -17,7 +17,7 @@ jobs:
     name: lint (clang-format 18 + REUSE)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@3d3c42e5aac5 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install pinned clang-format and reuse
         # Pinned so the check matches what contributors are told to install
         # (see CONTRIBUTING.md); distro clang-formats drift between majors.
@@ -35,7 +35,7 @@ jobs:
     name: commit message convention
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@3d3c42e5aac5 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
       - name: Check Conventional Commits (RFC 0000 §5)
@@ -66,7 +66,7 @@ jobs:
       matrix:
         cxx: [g++, clang++]
     steps:
-      - uses: actions/checkout@3d3c42e5aac5 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -91,7 +91,7 @@ jobs:
           sudo env PATH="$PATH" TMPDIR=/tmp
           tests/integration/run_tests.sh "$PWD/build/mount.gitmount"
       - name: Upload binary
-        uses: actions/upload-artifact@043fb46d1a93 # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mount.gitmount-${{ matrix.cxx }}-system
           path: build/mount.gitmount
@@ -102,7 +102,7 @@ jobs:
     name: vendored libgit2 (ubuntu-22.04, oldest supported base)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@3d3c42e5aac5 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -125,7 +125,7 @@ jobs:
     name: sanitizers (ASan + UBSan)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@3d3c42e5aac5 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -153,7 +153,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure -R '^integration$'
       - name: Upload sanitizer binary
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93 # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mount.gitmount-sanitized
           path: build/mount.gitmount
