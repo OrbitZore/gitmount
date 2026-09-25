@@ -1,0 +1,9 @@
+# Sources are UTF-8 text with LF line endings (RFC 0000 §5).
+* text=auto eol=lf
+
+# Windows batch files (none today) would keep CRLF:
+# *.bat text eol=crlf
+
+# Binaries
+*.png binary
+*.gz binary

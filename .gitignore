@@ -1,0 +1,28 @@
+# Build directories
+build/
+build-*/
+out/
+cmake-build-*/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*~
+.compile_commands.json
+clangd/
+
+# CMake artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+Testing/
+_deps/
+
+# Test artifacts
+tests/tmp/
+*.log.tmp
+
+# OS noise
+.DS_Store

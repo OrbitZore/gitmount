@@ -1,0 +1,81 @@
+# gitfs CI — RFC 0000 §5: lint + build + test matrix.
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint (clang-format)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+      - name: Check formatting
+        run: |
+          find src tests -name '*.cpp' -o -name '*.hpp' | \
+            xargs clang-format --dry-run --Werror
+
+  conventional-commits:
+    name: commit message convention
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check Conventional Commits (RFC 0000 §5)
+        run: |
+          range="${{ github.event.pull_request.base.sha }}..HEAD"
+          [ "${{ github.event_name }}" = "pull_request" ] || range="HEAD~1..HEAD"
+          bad=0
+          while IFS= read -r sha; do
+            msg=$(git log -1 --format=%s "$sha")
+            printf '%s: %s\n' "$sha" "$msg"
+            case "$msg" in
+              "feat:"*|"fix:"*|"docs:"*|"test:"*|"refactor:"*|"chore:"*|"perf:"*|"build:"*|"ci:"*|\
+              "feat("*"):"*|"fix("*"):"*|"docs("*"):"*|"test("*"):"*|"refactor("*"):"*|\
+              "chore("*"):"*|"perf("*"):"*|"build("*"):"*|"ci("*"):")"*) ;;
+              *) echo "  -> not a Conventional Commit"; bad=1 ;;
+            esac
+          done < <(git rev-list --no-merges "$range")
+          exit $bad
+
+  build-test:
+    name: ${{ matrix.compiler }} (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential clang pkg-config cmake ninja-build \
+            libfuse3-dev libgit2-dev
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DGITFS_WERROR=ON
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+      - name: Build
+        run: cmake --build build
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure -R '^unit$'
+      - name: Integration tests (may skip without /dev/fuse)
+        run: ctest --test-dir build --output-on-failure -R '^integration$'
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: mount.gitfs-${{ matrix.compiler }}
+          path: build/mount.gitfs

@@ -1,0 +1,9 @@
+# RFC 0000 §5 / 决议 Q6: clang-format, Google style.
+---
+Language:        Cpp
+BasedOnStyle:    Google
+IndentWidth:     2
+ColumnLimit:     100
+AccessModifierOffset: -1
+IncludeBlocks:   Preserve
+SortIncludes:    CaseSensitive
