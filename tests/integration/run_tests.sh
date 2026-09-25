@@ -98,6 +98,13 @@ check "cli: -o rw accepted" sh -c "'$BIN' '$REPO' '$TMP/x' -f -o rw >/dev/null 2
 check "cli: -t gitmount accepted" sh -c "'$BIN' '$REPO' '$TMP/x' -t gitmount -f >/dev/null 2>&1"
 check "cli: -t other rejected" sh -c "'$BIN' '$REPO' '$TMP/x' -t other >/dev/null 2>&1; test \$? -eq 1"
 check "cli: options after positionals" sh -c "'$BIN' '$REPO' '$TMP/x' -f -o rw >/dev/null 2>&1"
+touch "$TMP/mp-notdir"
+check "cli: file mountpoint rejected (exit 1)" \
+  sh -c "'$BIN' '$REPO' '$TMP/mp-notdir' >/dev/null 2>&1; test \$? -eq 1"
+check "cli: fake validates file mountpoint too (exit 1)" \
+  sh -c "'$BIN' '$REPO' '$TMP/mp-notdir' -f >/dev/null 2>&1; test \$? -eq 1"
+check "cli: file mountpoint error message names the path" \
+  sh -c "'$BIN' '$REPO' '$TMP/mp-notdir' 2>&1 | grep -q 'not a directory'"
 
 # ---------------------------------------------------------------------------
 # main mount

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- A mountpoint that is a regular file is now rejected up front with a
+clear error (exit 1, also under `-f`); previously libfuse accepted the
+  mount and every access returned EIO (stress-test finding ①).
+- Blob cache miss loads no longer copy the payload a second time on
+  insert (finding ②, transient double buffering).
+- glibc's dynamic mmap threshold is pinned at startup: multi-megabyte
+  payloads now come from mmap and are returned to the OS on release,
+  eliminating arena retention that grew ~3x the configured blob cache
+  under concurrent churn (finding ②; anonymous memory now ≈ 1.1× the
+  configured cache on the churn workload).
+
+### Changed
+- Documentation now states the real memory semantics: cache knobs bound
+  accounted payload bytes; RSS additionally contains parsed tree/commit
+  metadata (~4–6× the tree budget on large histories), bookkeeping and
+  reclaimable mmap'd packfile pages (finding ②), and the man page no
+  longer claims non-commit tags are hidden from the `tag/` listing —
+  listings are enumeration hints; such tags return ENOENT on access
+  (finding ③).
+
 ## [0.0.1] - 2026-09-25
 
 First packaged release.

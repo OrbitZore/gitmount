@@ -221,9 +221,15 @@ with a warning logged).
 .TP
 .I tag/
 All tags, annotated and lightweight.
-A tag that points directly to a tree or blob object is not presented
-.RB ( ENOENT );
-only commit targets are shown.
+A tag that points directly to a tree or blob object is not resolvable:
+access yields
+.B ENOENT
+(with a warning logged).
+Such a tag may still appear in the
+.I tag/
+listing \(em listings enumerate the ref database and are enumeration
+hints, not access promises (the same shape\-mismatch rule as merged
+nodes).
 .TP
 .I commit/
 Arbitrary commits by full object id:
@@ -515,6 +521,10 @@ never triggers a blob decompression, just as it never triggers the
 revwalk.
 The memory footprint of oversized blobs is the sum of their sizes
 across concurrently open handles.
+The cache limit bounds accounted payload bytes only; the daemon's
+resident set is larger in practice (see
+.BR \-\-tree\-cache\-size 
+for the measured breakdown).
 The value must be a positive integer; 0, negative, or unparseable
 values are usage errors (exit status 1); there is no artificial upper
 cap (bounded only by available memory).
@@ -522,6 +532,18 @@ cap (bounded only by available memory).
 .BI \-\-tree\-cache\-size \ MiB
 Total budget of the libgit2 object cache (trees and commits) in MiB
 (default 256).
+libgit2 accounts cached objects by their serialized size, while the
+in\-memory parsed representation is several times larger (commit
+signatures, tree entry arrays, duplicated names): expect the real
+footprint of a full budget to be roughly 4\-6x the configured value on
+large histories.
+Together with mmap'ed packfile pages (file\-backed, shared between
+processes and reclaimable under pressure), the daemon's RSS therefore
+exceeds the configured totals.
+Measured on a 612,588\-commit, 183,425\-file repository: the defaults
+settle near 2.1 GB RSS, of which roughly 1.2 GB tracks the 256 MiB
+tree/commit budget \(em tune this knob first on memory\-constrained
+machines.
 Validation is identical to
 .BR \-\-blob\-cache\-size .
 Tree/commit metadata is served from this separate internal cache and is

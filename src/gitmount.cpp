@@ -672,9 +672,15 @@ int Gitmount::load_blob_locked(const git_oid& oid, BlobView* view) {
     view->owned.clear();
     return 0;
   }
-  if (blob_cache_.insert(key, data)) {
+  if (data.size() < blob_cache_.capacity()) {
+    // Insert by move: the payload is allocated exactly once (the ODB
+    // read); the previous by-lvalue insert copied the whole blob on
+    // every miss load (stress-test finding ② — transient double
+    // buffering under concurrent readers).
+    blob_cache_.insert(key, std::move(data));
     view->cached = blob_cache_.lookup(key);
     view->owned.clear();
+    view->owned.shrink_to_fit();
     return 0;
   }
   // Bypass: values at/over capacity stay private to this call (§3.5).

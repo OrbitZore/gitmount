@@ -9,7 +9,9 @@
 //   2  repository unreadable / not a git repository
 //   3  mount failure
 #include <limits.h>
+#include <malloc.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <cerrno>
 #include <cstdio>
@@ -58,6 +60,32 @@ int main(int argc, char** argv) {
 
   const cli::Options& opts = parsed.options;
   log::set_verbose(opts.verbose);
+
+#if defined(__GLIBC__)
+  // Allocator tuning (stress-test finding ②): glibc's dynamic mmap
+  // threshold grows every time a large block is freed, after which
+  // same-sized allocations come from the brk heap and are NOT returned
+  // to the OS on free. A cache that repeatedly loads and evicts
+  // multi-MB blobs across many threads makes per-thread arenas balloon
+  // deterministically (measured: ~14x the configured blob cache on a
+  // 183k-file repository). Pinning the threshold (any explicit
+  // mallopt(M_MMAP_THRESHOLD) disables the dynamic adjustment) keeps
+  // large payloads on mmap and returned on release.
+  ::mallopt(M_MMAP_THRESHOLD, 1 << 20);
+  ::mallopt(M_TRIM_THRESHOLD, 2 << 20);
+#endif
+
+  // Mountpoint sanity check (stress-test finding ①): libfuse happily
+  // mounts over a regular file and every later access returns EIO, so
+  // reject it up front — also under -f, where predicting boot-time
+  // failure is the whole point of fake validation. A nonexistent
+  // mountpoint stays a mount-time failure (exit 3).
+  struct stat mp_st {};
+  if (::stat(opts.mountpoint.c_str(), &mp_st) == 0 && !S_ISDIR(mp_st.st_mode)) {
+    std::fprintf(stderr, "mount.gitmount: mountpoint '%s' is not a directory\n",
+                 opts.mountpoint.c_str());
+    return 1;
+  }
 
   libgit2_global_init();
   libgit2_configure_cache(opts.tree_cache_bytes);
