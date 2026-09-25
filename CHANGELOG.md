@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-09-25
+
 ### Changed
 - Tier-2 metadata caches: gitmount now caches trees as raw serialized
   bytes plus a 4-byte-per-entry offset index (zero-copy entry names,
@@ -72,5 +74,6 @@ First packaged release.
   fixture repository, real-mount integration suite, CI matrix, man page,
   GPL-3.0-or-later licensing.
 
-[Unreleased]: https://github.com/OrbitZore/gitmount/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/OrbitZore/gitmount/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/OrbitZore/gitmount/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/OrbitZore/gitmount/releases/tag/v0.0.1
