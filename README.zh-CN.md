@@ -94,7 +94,16 @@ $ sudo umount /mnt/linux
 
 ## 安装
 
-从源码构建（暂无发布版本——见 [CHANGELOG.md](CHANGELOG.md)）：
+各 [GitHub release](https://github.com/OrbitZore/gitmount/releases) 附
+带二进制 tar 包（双 glibc 基座，含 SPDX SBOM 与构建溯源签名）。
+
+Arch Linux 用户可从 AUR 安装：
+
+```sh
+paru -S gitmount        # 或：yay -S gitmount
+```
+
+从源码构建：
 
 ```sh
 git clone https://github.com/OrbitZore/gitmount

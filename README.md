@@ -100,7 +100,17 @@ need `/dev/fuse` + `fusermount3` and skip cleanly otherwise.
 
 ## Installation
 
-From source (no releases yet — see [CHANGELOG.md](CHANGELOG.md)):
+Binary release tarballs (two glibc bases, with SPDX SBOMs and build
+attestations) are attached to each
+[GitHub release](https://github.com/OrbitZore/gitmount/releases).
+
+On Arch Linux, install from the AUR:
+
+```sh
+paru -S gitmount        # or: yay -S gitmount
+```
+
+From source:
 
 ```sh
 git clone https://github.com/OrbitZore/gitmount
