@@ -1,0 +1,37 @@
+name: Feature request
+description: Suggest new behavior or an improvement
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        gitfs's observable semantics are pinned by
+        [RFC 0000](https://github.com/OrbitZore/gitfs/blob/main/rfc/0000-gitfs.md);
+        v0.1 explicitly excludes write paths, network operations and sparse
+        checkouts. Ideas that change pinned semantics may need an RFC
+        amendment — describe the motivation thoroughly.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: The use case, not the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Including "how do people cope today".
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This does not require a write path or network access.
+          required: false

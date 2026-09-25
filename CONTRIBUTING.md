@@ -55,6 +55,25 @@ repository shape the fixture script can express), and verbose logs
 (`-v`) where relevant. Do not browse untrusted repositories as root
 (see [SECURITY.md](SECURITY.md)).
 
+## Releasing
+
+Releases are produced by the [release workflow](.github/workflows/release.yml)
+(RFC 0000 §5: tag → release, CI produces per-distro binaries + SBOM):
+
+1. Bump the version in **three synchronized places**:
+   `CMakeLists.txt` (`project(... VERSION ...)`), `src/options.cpp`
+   (`version_string()`), `docs/mount.gitfs.8` (`.TH` line).
+2. Move the `[Unreleased]` entries in `CHANGELOG.md` into a version
+   heading with a compare link.
+3. Commit (`chore: release v0.0.1`), tag `v0.0.1`, push the tag. The
+   workflow verifies tag/version consistency, builds portable binaries
+   (pinned static libgit2) on two glibc bases, runs the full test suite,
+   and publishes tarballs + SPDX SBOMs + sha256 checksums with
+   build-provenance attestations.
+
+SemVer applies from 1.0.0; the 0.x line signals initial development
+where semantics may still shift with an RFC amendment.
+
 ## Licensing
 
 By contributing you agree that your contributions are licensed under

@@ -1,0 +1,65 @@
+name: Bug report
+description: gitfs does not behave as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Before filing, please
+        check [docs/filesystem-semantics.md]
+        (https://github.com/OrbitZore/gitfs/blob/main/docs/filesystem-semantics.md) —
+        several read-only behaviors are pinned by design (e.g. `/commit`
+        is never listable, `refs/replace` is never followed).
+  - type: input
+    id: version
+    attributes:
+      label: gitfs version
+      description: Output of `mount.gitfs --version`
+      placeholder: gitfs 0.0.1
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Distro/kernel, libgit2 and libfuse3 versions
+      placeholder: Arch Linux 6.x, libgit2 1.9.7, fuse3 3.18
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened? What did you expect?
+      description: Actual vs. expected behavior; include exact paths/oids where possible.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: >-
+        Commands that work on a fresh clone. If the repository shape matters,
+        describe it with the operations used by tests/fixtures/make_repo.sh
+        (mktree, hash-object, update-ref, hand-edited packed-refs, ...).
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Verbose logs
+      description: Mount with `-v` and attach relevant stderr output.
+      render: shell
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: >-
+            I checked docs/filesystem-semantics.md — this is not pinned
+            behavior.
+          required: true
+        - label: >-
+            I am not browsing an untrusted repository as root
+            (see SECURITY.md).
+          required: true

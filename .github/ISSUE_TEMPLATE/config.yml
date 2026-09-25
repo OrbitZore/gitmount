@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Filesystem semantics (read before filing)
+    url: https://github.com/OrbitZore/gitfs/blob/main/docs/filesystem-semantics.md
+    about: >-
+      Many read-only quirks (EROFS, hidden remote HEADs, /commit not
+      listable, byte-ordered listings) are pinned by design.
+  - name: Design document (RFC 0000)
+    url: https://github.com/OrbitZore/gitfs/blob/main/rfc/0000-gitfs.md
+    about: The normative design document (Chinese).
