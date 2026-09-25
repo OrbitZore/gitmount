@@ -86,13 +86,20 @@ int cmp_tree_name(std::string_view entry_name, bool entry_is_tree, std::string_v
     // bytes as found regardless of directory-ness.)
     return 0;
   }
-  (void)entry_is_tree;
-  // One is a proper prefix of the other: compare the next byte of the
-  // longer side, where trees carry a virtual '/' and the probe a '\0'.
-  const char entry_next = entry_name.size() > n ? entry_name[n] : (entry_is_tree ? '/' : '\0');
-  const char probe_next = probe.size() > n ? probe[n] : '\0';
+  if (entry_name.size() > n) {
+    // The entry extends the probe (e.g. "x-y" vs probe "x"): the probe's
+    // effective sort key is "x/" — its directory slot in git tree order —
+    // so the tie-break is entry_name[n] vs '/'. Comparing against '\0'
+    // instead sent the binary search the wrong way whenever the sibling's
+    // next byte is < '/' (hyphens!): "llvm-as-fuzzer" sorts BEFORE the
+    // directory "llvm-as/" yet compared greater than the probe.
+    return static_cast<int>(static_cast<unsigned char>(entry_name[n])) - '/';
+  }
+  // The probe extends the entry: the entry continues with '/' if it is a
+  // tree (its stored sort key), else effectively terminates.
+  const char entry_next = entry_is_tree ? '/' : '\0';
   return static_cast<int>(static_cast<unsigned char>(entry_next)) -
-         static_cast<int>(static_cast<unsigned char>(probe_next));
+         static_cast<int>(static_cast<unsigned char>(probe[n]));
 }
 
 std::optional<TreeEnt> tree_find(const TreeData& tree, std::string_view name, git_oid_t oid_type) {

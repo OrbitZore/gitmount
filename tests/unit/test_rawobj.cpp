@@ -114,7 +114,13 @@ TEST_CASE("cmp_tree_name applies the '/' suffix rule", "[rawobj]") {
   CHECK(cmp_tree_name("foo", true, "foo") == 0);
   // "foo.txt" vs dir "foo": '.' (0x2E) < '/' (0x2F) — file first.
   CHECK(cmp_tree_name("foo", true, "foo.txt") > 0);
-  CHECK(cmp_tree_name("foo.txt", false, "foo") > 0);  // plain compare
+  // Regression (stress-test 0.0.2): the probe's effective key is its
+  // DIRECTORY slot "foo/", so an extending sibling with a next byte < '/'
+  // (hyphen, dot) compares BEFORE the probe — comparing against '\0'
+  // instead flipped the binary search and made whole directories ENOENT.
+  CHECK(cmp_tree_name("foo.txt", false, "foo") < 0);
+  CHECK(cmp_tree_name("foo-x", false, "foo") < 0);
+  CHECK(cmp_tree_name("foo0", false, "foo") > 0);  // '0' > '/' sorts after
   // probe is a prefix of a longer plain name.
   CHECK(cmp_tree_name("foobar", false, "foo") > 0);
   CHECK(cmp_tree_name("foo", false, "foobar") < 0);
@@ -254,4 +260,46 @@ TEST_CASE("MetaLruCache evicts least-recently-used", "[meta_cache]") {
   CHECK(c.bytes() <= 512);
   CHECK(c.lookup("k0") == nullptr);  // evicted long ago
   CHECK(c.lookup("k7") != nullptr);
+}
+
+TEST_CASE("tree_find binary search: disagreement-sibling matrix (0.0.2 regression)", "[rawobj]") {
+  // For every (N, victim position) combination, a canonical git-order
+  // tree with a "x-y" sibling directly before the victim directory "x"
+  // must resolve "x" — the 0.0.2 comparator compared the probe against
+  // '\0' instead of the '/' directory slot and missed 832 combinations
+  // of this matrix (llvm: 44 unreachable directories).
+  int misses = 0;
+  for (int N = 65; N <= 90; ++N) {
+    for (int v = 0; v < N; ++v) {
+      std::vector<std::string> names;
+      char b[16];
+      for (int i = 0; i < v; ++i) {
+        std::snprintf(b, sizeof(b), "a%03d", i);
+        names.emplace_back(b);
+      }
+      names.emplace_back("x-y");
+      names.emplace_back("x");
+      for (int i = 0; N > static_cast<int>(names.size()); ++i) {
+        std::snprintf(b, sizeof(b), "z%03d", i);
+        names.emplace_back(b);
+      }
+      std::string raw;
+      for (const auto& nm : names) {
+        raw += (nm == "x") ? "40000 " : "100644 ";
+        raw += nm;
+        raw += '\0';
+        raw.append(20, '\x01');
+      }
+      TreeData td;
+      td.raw = std::move(raw);
+      auto idx = index_tree(td.raw.data(), td.raw.size(), GIT_OID_SHA1);
+      REQUIRE(idx.has_value());
+      td.offsets = std::move(*idx);
+      INFO("N=" << N << " victim_idx=" << v + 1);
+      if (!tree_find(td, "x", GIT_OID_SHA1)) ++misses;
+      // The sibling itself must still resolve.
+      REQUIRE(tree_find(td, "x-y", GIT_OID_SHA1).has_value());
+    }
+  }
+  CHECK(misses == 0);
 }
