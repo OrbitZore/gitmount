@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.1] - 2026-09-25
+
+First packaged release.
+
 ### Changed
 - Renamed the project from **gitfs** to **gitmount** (in place, per the
   frozen RFC 0000): the mount helper is `mount.gitmount`, the fstype is
@@ -36,4 +40,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixture repository, real-mount integration suite, CI matrix, man page,
   GPL-3.0-or-later licensing.
 
-[Unreleased]: https://github.com/OrbitZore/gitmount/commits/main/CHANGELOG.md
+[Unreleased]: https://github.com/OrbitZore/gitmount/compare/v0.0.1...HEAD
+[0.0.1]: https://github.com/OrbitZore/gitmount/releases/tag/v0.0.1
