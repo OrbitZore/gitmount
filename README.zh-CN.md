@@ -94,16 +94,31 @@ $ sudo umount /mnt/linux
 
 ## 安装
 
-各 [GitHub release](https://github.com/OrbitZore/gitmount/releases) 附
-带二进制 tar 包（双 glibc 基座，含 SPDX SBOM 与构建溯源签名）。
-
-Arch Linux 用户可从 AUR 安装：
+### Arch Linux（AUR）
 
 ```sh
-paru -S gitmount        # 或：yay -S gitmount
+paru -S gitmount          # 或：yay -S gitmount
 ```
 
-从源码构建：
+不装 AUR 助手也行：
+
+```sh
+git clone https://aur.archlinux.org/gitmount.git
+cd gitmount
+makepkg -si
+```
+
+包从发布源码 tar 构建，`check()` 阶段跑全量测试——集成测试会执行
+真实 FUSE 挂载，无 `/dev/fuse` 的环境自动跳过。安装内容为
+`/usr/bin/mount.gitmount` 与手册页（`man 8 mount.gitmount`）。
+
+### 二进制 tar 包
+
+各 [GitHub release](https://github.com/OrbitZore/gitmount/releases) 附
+带双 glibc 基座（2.35 / 2.39）的预构建 tar 包，含 SPDX SBOM、
+SHA-256 校验和与构建溯源签名。
+
+### 从源码构建
 
 ```sh
 git clone https://github.com/OrbitZore/gitmount

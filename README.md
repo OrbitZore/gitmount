@@ -100,17 +100,33 @@ need `/dev/fuse` + `fusermount3` and skip cleanly otherwise.
 
 ## Installation
 
-Binary release tarballs (two glibc bases, with SPDX SBOMs and build
-attestations) are attached to each
-[GitHub release](https://github.com/OrbitZore/gitmount/releases).
-
-On Arch Linux, install from the AUR:
+### Arch Linux (AUR)
 
 ```sh
-paru -S gitmount        # or: yay -S gitmount
+paru -S gitmount          # or: yay -S gitmount
 ```
 
-From source:
+No AUR helper needed:
+
+```sh
+git clone https://aur.archlinux.org/gitmount.git
+cd gitmount
+makepkg -si
+```
+
+The package builds from the release source tarball and runs the full
+test suite in `check()` — the integration tests perform real FUSE
+mounts and self-skip where `/dev/fuse` is unavailable. It installs
+`/usr/bin/mount.gitmount` together with its man page
+(`man 8 mount.gitmount`).
+
+### Binary tarballs
+
+Each [GitHub release](https://github.com/OrbitZore/gitmount/releases)
+attaches prebuilt tarballs for two glibc bases (2.35 / 2.39), with
+SPDX SBOMs, SHA-256 checksums and build attestations.
+
+### From source
 
 ```sh
 git clone https://github.com/OrbitZore/gitmount
