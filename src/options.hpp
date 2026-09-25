@@ -1,4 +1,5 @@
 // gitmount — read-only git-to-FUSE filesystem (RFC 0000).
+// SPDX-FileCopyrightText: 2026 The gitmount authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // CLI / mount(8) helper argument parsing (RFC 0000 §3.7).

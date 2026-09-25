@@ -1,4 +1,5 @@
 // gitmount unit tests — git_to_errno (RFC 0000 §3.3).
+// SPDX-FileCopyrightText: 2026 The gitmount authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <catch2/catch_test_macros.hpp>
 

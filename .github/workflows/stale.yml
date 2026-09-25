@@ -1,5 +1,6 @@
 # Gentle stale bot: close dormant issues after 30 days without activity,
 # dormant PRs after 14 days. Pinned/security items are exempt.
+# SPDX-FileCopyrightText: 2026 The gitmount authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 name: stale
 

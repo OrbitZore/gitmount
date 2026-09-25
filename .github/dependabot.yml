@@ -1,4 +1,6 @@
 # Dependabot: keep GitHub Actions references current.
+# SPDX-FileCopyrightText: 2026 The gitmount authors
+# SPDX-License-Identifier: GPL-3.0-or-later
 # CMake FetchContent pins (Catch2, libgit2) are deliberate version pins —
 # they are reviewed via docs/maintenance-checklist.md, not auto-bumped.
 version: 2

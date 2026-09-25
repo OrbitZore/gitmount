@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # gitmount — fixture repository generator (RFC 0000 §5).
+# SPDX-FileCopyrightText: 2026 The gitmount authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Builds the pinned fixture repo covering every integration assertion:

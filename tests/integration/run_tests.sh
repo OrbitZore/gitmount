@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # gitmount — integration tests (RFC 0000 §5).
+# SPDX-FileCopyrightText: 2026 The gitmount authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Runs real FUSE mounts against the fixture repository and asserts the

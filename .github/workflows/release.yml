@@ -1,5 +1,6 @@
 # gitmount release pipeline — RFC 0000 §5: 打 tag 出 release，CI 产出各发行版
 # 二进制 + SBOM。
+# SPDX-FileCopyrightText: 2026 The gitmount authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Trigger: pushing a v* tag (e.g. v0.0.1). The tag must match the CMake

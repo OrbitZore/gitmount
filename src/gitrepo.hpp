@@ -1,4 +1,5 @@
 // gitmount — read-only git-to-FUSE filesystem (RFC 0000).
+// SPDX-FileCopyrightText: 2026 The gitmount authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // GitRepo: libgit2 RAII wrapper (RFC 0000 §3.4/§5). Every libgit2 call in

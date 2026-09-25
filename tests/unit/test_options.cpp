@@ -1,4 +1,5 @@
 // gitmount unit tests — CLI / mount(8) helper option parsing (RFC 0000 §3.7).
+// SPDX-FileCopyrightText: 2026 The gitmount authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <catch2/catch_test_macros.hpp>
 
