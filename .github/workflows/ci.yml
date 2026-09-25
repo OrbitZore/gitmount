@@ -6,6 +6,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -20,8 +21,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y clang-format
       - name: Check formatting
         run: |
-          find src tests -name '*.cpp' -o -name '*.hpp' | \
-            xargs clang-format --dry-run --Werror
+          find src tests \( -name '*.cpp' -o -name '*.hpp' \) -print0 | \
+            xargs -0 clang-format --dry-run --Werror
 
   conventional-commits:
     name: commit message convention
@@ -41,14 +42,14 @@ jobs:
             case "$msg" in
               "feat:"*|"fix:"*|"docs:"*|"test:"*|"refactor:"*|"chore:"*|"perf:"*|"build:"*|"ci:"*|\
               "feat("*"):"*|"fix("*"):"*|"docs("*"):"*|"test("*"):"*|"refactor("*"):"*|\
-              "chore("*"):"*|"perf("*"):"*|"build("*"):"*|"ci("*"):")"*) ;;
+              "chore("*"):"*|"perf("*"):"*|"build("*"):"*|"ci("*"):"*) ;;
               *) echo "  -> not a Conventional Commit"; bad=1 ;;
             esac
           done < <(git rev-list --no-merges "$range")
           exit $bad
 
   build-test:
-    name: ${{ matrix.compiler }} (ubuntu-24.04)
+    name: ${{ matrix.compiler }} (ubuntu-24.04, system libgit2)
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -72,10 +73,77 @@ jobs:
         run: cmake --build build
       - name: Unit tests
         run: ctest --test-dir build --output-on-failure -R '^unit$'
-      - name: Integration tests (may skip without /dev/fuse)
+      - name: Integration tests (skips without /dev/fuse)
         run: ctest --test-dir build --output-on-failure -R '^integration$'
+      - name: Integration tests as root (mount(8) helper scenarios)
+        if: matrix.compiler == 'gcc'
+        run: >
+          sudo env PATH="$PATH" TMPDIR=/tmp
+          tests/integration/run_tests.sh "$PWD/build/mount.gitfs"
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: mount.gitfs-${{ matrix.compiler }}
+          name: mount.gitfs-${{ matrix.compiler }}-system
+          path: build/mount.gitfs
+
+  vendored-build:
+    # The pinned static libgit2 path used for release binaries (see
+    # release.yml): build it on PRs too so it never rots.
+    name: vendored libgit2 (ubuntu-22.04, oldest supported base)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config cmake ninja-build \
+            libfuse3-dev
+      - name: Configure (vendored libgit2 v1.9.7, static)
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DGITFS_WERROR=ON
+          -DGITFS_USE_SYSTEM_LIBGIT2=OFF
+      - name: Build
+        run: cmake --build build
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure -R '^unit$'
+      - name: Integration tests (skips without /dev/fuse)
+        run: ctest --test-dir build --output-on-failure -R '^integration$'
+
+  sanitize:
+    name: sanitizers (ASan + UBSan)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config cmake ninja-build \
+            libfuse3-dev libgit2-dev
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DGITFS_WERROR=ON
+          -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer'
+          -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+      - name: Build
+        run: cmake --build build
+      - name: Unit tests (leak detection on)
+        env:
+          UBSAN_OPTIONS: 'halt_on_error=1:print_stacktrace=1'
+          ASAN_OPTIONS: 'detect_leaks=1:abort_on_error=1'
+        run: ctest --test-dir build --output-on-failure -R '^unit$'
+      - name: Integration tests (leak detection off — FUSE daemon teardown)
+        env:
+          UBSAN_OPTIONS: 'halt_on_error=1:print_stacktrace=1'
+          ASAN_OPTIONS: 'detect_leaks=0:abort_on_error=1'
+        run: ctest --test-dir build --output-on-failure -R '^integration$'
+      - name: Upload sanitizer binary
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mount.gitfs-sanitized
           path: build/mount.gitfs

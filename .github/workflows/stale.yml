@@ -1,0 +1,44 @@
+# Gentle stale bot: close dormant issues after 30 days without activity,
+# dormant PRs after 14 days. Pinned/security items are exempt.
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: stale
+
+on:
+  schedule:
+    - cron: '31 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/stale@v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          operations-per-run: 100
+          days-before-issue-stale: 30
+          days-before-issue-close: 7
+          stale-issue-message: >
+            This issue has been automatically marked as stale because it has
+            not had activity in 30 days. It will be closed in 7 days if no
+            further activity occurs. Comment to keep it open, or add the
+            `pinned` label if it should stay on the roadmap.
+          close-issue-message: >
+            Closed automatically due to inactivity. Please reopen with new
+            information if it is still relevant.
+          exempt-issue-labels: 'pinned,security,good first issue'
+          days-before-pr-stale: 14
+          days-before-pr-close: 7
+          stale-pr-message: >
+            This pull request has been automatically marked as stale because
+            it has not had activity in 14 days. It will be closed in 7 days
+            if no further activity occurs.
+          close-pr-message: >
+            Closed automatically due to inactivity. Feel free to reopen.
+          exempt-pr-labels: 'pinned,security'

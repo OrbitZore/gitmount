@@ -1,0 +1,131 @@
+# gitfs release pipeline — RFC 0000 §5: 打 tag 出 release，CI 产出各发行版
+# 二进制 + SBOM。
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Trigger: pushing a v* tag (e.g. v0.0.1). The tag must match the CMake
+# project version (CMakeLists.txt / version_string / man .TH).
+# Artifacts: per-base tarballs (stripped binary + man page + docs),
+# SPDX SBOMs, sha256 checksums, and build-provenance attestations.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: package (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Two glibc bases; both bake the pinned static libgit2 so the only
+        # runtime dependency is libfuse3 (soname libfuse3.so.3).
+        include:
+          - os: ubuntu-22.04
+            label: linux-amd64-glibc2.35
+          - os: ubuntu-24.04
+            label: linux-amd64-glibc2.39
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tag matches project version
+        run: |
+          VER=$(sed -n 's/^  VERSION \([0-9][0-9.]*\)$/\1/p' CMakeLists.txt | head -1)
+          if [ -z "$VER" ]; then echo "cannot parse project version" >&2; exit 1; fi
+          if [ "${{ github.ref_type }}" = "tag" ] && [ "${GITHUB_REF_NAME#v}" != "$VER" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match CMake project version $VER" >&2
+            exit 1
+          fi
+          echo "VERSION=$VER" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config cmake ninja-build \
+            libfuse3-dev
+
+      - name: Configure (vendored libgit2, static)
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DGITFS_WERROR=ON
+          -DGITFS_USE_SYSTEM_LIBGIT2=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Tests (unit + integration; integration skips without /dev/fuse)
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package
+        run: |
+          set -eu
+          PKG="gitfs-${VERSION}-${{ matrix.label }}"
+          mkdir -p dist
+          cmake --install build --strip --prefix "$PKG"
+          gzip -9n "$PKG/share/man/man8/mount.gitfs.8"
+          cp LICENSE README.md README.zh-CN.md "$PKG/"
+          mkdir -p "$PKG/docs"
+          cp docs/filesystem-semantics.md docs/maintenance-checklist.md "$PKG/docs/"
+          tar --sort=name --owner=0 --group=0 --numeric-owner \
+            -czf "dist/$PKG.tar.gz" "$PKG"
+          echo "PKG=$PKG" >> "$GITHUB_ENV"
+
+      - name: Generate SBOM (SPDX)
+        uses: anchore/sbom-action@v0
+        with:
+          path: ${{ env.PKG }}
+          format: spdx-json
+          output-file: dist/${{ env.PKG }}.spdx.json
+          upload-artifact: false
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.label }}
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    name: publish GitHub release
+    needs: package
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # create the release
+      id-token: write      # build-provenance attestations
+      attestations: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz *.spdx.json > sha256sums.txt
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.spdx.json
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.spdx.json
+            dist/sha256sums.txt
+          generate_release_notes: true
+          fail_on_unmatched_files: true
