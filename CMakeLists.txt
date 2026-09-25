@@ -22,8 +22,46 @@ include(GNUInstallDirs)
 # ---------------------------------------------------------------------------
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FUSE3 REQUIRED IMPORTED_TARGET fuse3>=3.10)
-pkg_check_modules(LIBGIT2 REQUIRED IMPORTED_TARGET libgit2>=1.4)
 find_package(Threads REQUIRED)
+
+# System libgit2 (>= 1.4) by default; a pinned vendored copy (v1.9.7,
+# static, network backends disabled) is used when the system version is
+# too old — e.g. Ubuntu 22.04 ships libgit2 1.1. The vendored path also
+# produces release binaries with one less runtime dependency.
+option(GITFS_USE_SYSTEM_LIBGIT2 "Link the system libgit2 (pkg-config); OFF builds a pinned vendored copy" ON)
+
+if(GITFS_USE_SYSTEM_LIBGIT2)
+  pkg_check_modules(LIBGIT2 REQUIRED IMPORTED_TARGET libgit2>=1.4)
+  set(GITFS_LIBGIT2_TARGET PkgConfig::LIBGIT2)
+else()
+  include(FetchContent)
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)  # static: bake into the binary
+  set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(BUILD_CLI OFF CACHE BOOL "" FORCE)
+  set(USE_SSH OFF CACHE BOOL "" FORCE)
+  set(USE_HTTPS OFF CACHE BOOL "" FORCE)
+  set(USE_GSSAPI OFF CACHE BOOL "" FORCE)
+  set(USE_NTLMCLIENT OFF CACHE BOOL "" FORCE)
+  set(USE_BUNDLED_ZLIB ON CACHE BOOL "" FORCE)
+  set(USE_ICONV OFF CACHE BOOL "" FORCE)
+  # gitfs reports second-precision committer times (RFC 0000 §3.2), so
+  # nanosecond stat support is irrelevant; disabling it also sidesteps
+  # libgit2's fragile st_mtim detection in embedded builds.
+  set(USE_NSEC OFF CACHE BOOL "" FORCE)
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
+    # Keep libgit2's own install rules out of `cmake --install`.
+    FetchContent_Declare(libgit2
+      GIT_REPOSITORY https://github.com/libgit2/libgit2.git
+      GIT_TAG        v1.9.7
+      EXCLUDE_FROM_ALL)
+  else()
+    FetchContent_Declare(libgit2
+      GIT_REPOSITORY https://github.com/libgit2/libgit2.git
+      GIT_TAG        v1.9.7)
+  endif()
+  FetchContent_MakeAvailable(libgit2)
+  set(GITFS_LIBGIT2_TARGET libgit2package)
+endif()
 
 # ---------------------------------------------------------------------------
 # Warnings (RFC 0000 §5: -Wall -Wextra -Wpedantic; -Werror on CI)
@@ -58,7 +96,7 @@ add_library(gitfs_core STATIC
   src/path_map.cpp)
 target_include_directories(gitfs_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(gitfs_core
-  PUBLIC PkgConfig::FUSE3 PkgConfig::LIBGIT2 Threads::Threads
+  PUBLIC PkgConfig::FUSE3 ${GITFS_LIBGIT2_TARGET} Threads::Threads
   PRIVATE gitfs_warnings)
 
 add_executable(mount.gitfs src/main.cpp)
