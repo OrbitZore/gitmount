@@ -32,7 +32,7 @@ jobs:
           - os: ubuntu-24.04
             label: linux-amd64-glibc2.39
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5 # v7
 
       - name: Verify tag matches project version
         run: |
@@ -78,7 +78,7 @@ jobs:
           echo "PKG=$PKG" >> "$GITHUB_ENV"
 
       - name: Generate SBOM (SPDX)
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@e22c38990414 # v0
         with:
           path: ${{ env.PKG }}
           format: spdx-json
@@ -86,7 +86,7 @@ jobs:
           upload-artifact: false
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93 # v7
         with:
           name: dist-${{ matrix.label }}
           path: dist/
@@ -103,7 +103,7 @@ jobs:
       attestations: write
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9 # v8
         with:
           pattern: dist-*
           path: dist
@@ -115,14 +115,14 @@ jobs:
           sha256sum *.tar.gz *.spdx.json > sha256sums.txt
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@4d101475d8b2 # v4
         with:
           subject-path: |
             dist/*.tar.gz
             dist/*.spdx.json
 
       - name: Create release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad # v3
         with:
           files: |
             dist/*.tar.gz
