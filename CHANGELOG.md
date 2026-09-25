@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Critical Tier-2 regression (0.0.3): the 0.0.2 fix made the binary
+  search use the directory-slot key (`name + '/'`) for *every* probe —
+  including lookups of files, whose stored key is the bare name and
+  which sort before all name-extending siblings. Files with an
+  extending sibling whose next byte is below `'/'` (e.g. `at_file.c`
+  next to `at_file.c.args`, `truncation.c` next to `truncation.c.h`)
+  became ENOENT on llvm-project (201 files, 0.11%). `tree_find` now
+  binary-searches twice — bare-name key, then directory-slot key —
+  covering both victim kinds (D/F uniqueness means at most one hits);
+  the disagreement-sibling matrix unit test covers file and directory
+  victims together.
+
 ## [0.0.3] - 2026-09-26
 
 ### Fixed
