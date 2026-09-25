@@ -244,12 +244,11 @@ tar -C /mnt/tag/v6.13 -czf v6.13.tgz .             # 打包某个 tag
 - **不遵循 `refs/replace`**——输出与 `git --no-replace-objects` 一致。
 - **st_ino 由路径派生且挂载期永不回收**——每百万个不同触及路径约数
   十 MB 内存。
-- **缓存上限只约束 payload 字节，不是 RSS**——守护进程实际驻留集还
-  含解析后的 tree/commit 元数据（巨型历史上可达 `--tree-cache-size`
-  的数倍）、逐条目簿记与 mmap 的 packfile 页（文件页、可回收）。
-  在 llvm-project（61 万 commit / 18 万文件）实测：默认配置稳态
-  RSS 约 2.1 GB，其中约 1.2 GB 对应 256 MiB 的 tree/commit 预算。
-  内存受限的机器优先调低 `--tree-cache-size`。
+- **缓存上限字节精确**——`--blob-cache-size` 与 `--tree-cache-size`
+  精确约束各自缓存（元数据按原始字节 + 微型索引缓存，而非解析后
+  对象）。RSS 另含 st_ino 注册表（每触及路径约 230 B）与 mmap 的
+  packfile 页（文件页、可回收）。内存受限的机器优先调低
+  `--tree-cache-size`。
 
 ## 常见问题
 

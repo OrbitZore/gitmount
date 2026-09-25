@@ -114,6 +114,16 @@ class Gitmount {
   // insert-or-bypass (RFC 0000 §3.4 exception 3). Each full decompression
   // logs one verbose line (decompression counter, §3.5).
   int load_blob_locked(const git_oid& oid, BlobView* view);
+  // Tier-2 metadata cache accessors (RFC 0000 §3.5 as amended). Both may
+  // drop and re-acquire mu_ for the segmented object read; on return mu_ is
+  // held again. tree_locked returns nullptr on failure (malformed=true for
+  // corrupt trees); commit_facts_locked returns 0 or -errno (-EINVAL marks
+  // the non-commit-target case of §3.1).
+  std::shared_ptr<const rawobj::TreeData> tree_locked(const git_oid& tree, bool* malformed);
+  int commit_facts_locked(const git_oid& target, git_oid* commit_out,
+                          rawobj::CommitFacts* facts_out);
+  int peel_ref_to_root_locked(const git_oid& target, const std::string& refname_for_log,
+                              git_oid* root_out, std::int64_t* time_out);
   // Oversized path (§3.5): decompress fully OUTSIDE the lock, caller pins
   // the result on the open handle. Returns 0 or errno.
   int decompress_blob_unlocked(const git_oid& oid, std::string* out);
@@ -177,6 +187,7 @@ class Gitmount {
 
   std::mutex mu_;  // the single mutex (RFC 0000 §3.4)
   BlobLruCache blob_cache_;
+  MetaLruCache meta_cache_;  // Tier-2: raw trees + commit facts (§3.5)
   InoRegistry inos_;
 
   // /commits single-flight state (RFC 0000 §3.4/§3.5).

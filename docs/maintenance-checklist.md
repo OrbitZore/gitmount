@@ -50,9 +50,12 @@ bump the watermark (RFC 0000 Q31 process convention).
 - `refs/replace` remains unimplemented upstream (libgit2 ≤ 1.9); if a
   future version adds replace following, **disable it** and add a unit
   test asserting the passthrough semantics (RFC 0000 §3.1).
-- The cache tuning in `src/gitrepo.cpp` (`libgit2_configure_cache`) pins
-  tree/commit per-type limits to 1 MiB and blob to 0 — verify the options
-  still exist and still mean the same thing.
+- `libgit2_configure_cache` pins libgit2's parsed-object cache fully
+  off (blob/tree/commit per-type limits 0) — gitmount's Tier-2 metadata
+  cache (`src/rawobj.*`, `MetaLruCache`) parses raw bytes itself.
+  If a future libgit2 changes raw object formats (it must not — the
+  object format is git's, not libgit2's), the raw parsers' unit tests
+  will catch it.
 
 ## FUSE / kernel changes
 

@@ -15,6 +15,7 @@
 
 #include "log.hpp"
 #include "path_map.hpp"
+#include "rawobj.hpp"
 
 namespace gitmount {
 
@@ -137,7 +138,8 @@ Gitmount::Gitmount(std::unique_ptr<GitRepo> repo, std::string repo_abs_path,
       repo_abs_path_(std::move(repo_abs_path)),
       blob_cache_bytes_(blob_cache_bytes),
       tree_cache_bytes_(tree_cache_bytes),
-      blob_cache_(blob_cache_bytes) {
+      blob_cache_(blob_cache_bytes),
+      meta_cache_(tree_cache_bytes) {
   mount_time_ = static_cast<std::int64_t>(::time(nullptr));
   uid_ = ::getuid();
   gid_ = ::getgid();
@@ -181,11 +183,15 @@ int Gitmount::walk_tree_locked(const git_oid& root_tree, const std::vector<std::
   git_oid cur = root_tree;
   out->commit_root_tree = root_tree;
   std::string walked;  // path inside the commit tree ("" at the root)
+  const git_oid_t oid_type = repo_->oid_type();
   for (std::size_t i = 0; i < comps.size(); ++i) {
     const bool last = (i + 1 == comps.size());
     const std::string& name = comps[i];
 
-    auto entry = repo_->tree_entry(cur, name);
+    bool malformed = false;
+    auto tree = tree_locked(cur, &malformed);
+    if (!tree) return malformed ? -EIO : -ENOENT;
+    auto entry = rawobj::tree_find(*tree, name, oid_type);
     if (!entry) {
       // Submodule marker fallback: "<name>.gitmount-submodule" with no real
       // entry of that name and a gitlink base entry (RFC 0000 §3.2). A real
@@ -195,8 +201,8 @@ int Gitmount::walk_tree_locked(const git_oid& root_tree, const std::vector<std::
       if (name.size() > kSuffixLen &&
           name.compare(name.size() - kSuffixLen, kSuffixLen, kSuffix) == 0) {
         const std::string base = name.substr(0, name.size() - kSuffixLen);
-        auto base_entry = repo_->tree_entry(cur, base);
-        if (base_entry && base_entry->mode == GIT_FILEMODE_COMMIT && last) {
+        auto base_entry = rawobj::tree_find(*tree, base, oid_type);
+        if (base_entry && base_entry->mode == rawobj::kModeCommit && last) {
           out->type = Node::Type::SubmoduleMarker;
           // .gitmodules keys submodules by their full tree path (§3.2).
           out->marker_path = walked.empty() ? base : walked + "/" + base;
@@ -208,7 +214,7 @@ int Gitmount::walk_tree_locked(const git_oid& root_tree, const std::vector<std::
       return -ENOENT;
     }
     switch (entry->mode) {
-      case GIT_FILEMODE_TREE:
+      case rawobj::kModeTree:
         if (last) {
           out->type = Node::Type::TreeDir;
           out->tree_oid = entry->oid;
@@ -218,21 +224,21 @@ int Gitmount::walk_tree_locked(const git_oid& root_tree, const std::vector<std::
         walked = walked.empty() ? name : walked + "/" + name;
         cur = entry->oid;
         break;
-      case GIT_FILEMODE_BLOB:
-      case GIT_FILEMODE_BLOB_EXECUTABLE:
+      case rawobj::kModeBlob:
+      case rawobj::kModeExec:
         if (!last) return -ENOENT;
         out->type = Node::Type::BlobFile;
         out->blob_oid = entry->oid;
-        out->executable = entry->mode == GIT_FILEMODE_BLOB_EXECUTABLE;
+        out->executable = entry->mode == rawobj::kModeExec;
         out->commit_time = commit_time;
         return 0;
-      case GIT_FILEMODE_LINK:
+      case rawobj::kModeLink:
         if (!last) return -ENOENT;
         out->type = Node::Type::Symlink;
         out->blob_oid = entry->oid;
         out->commit_time = commit_time;
         return 0;
-      case GIT_FILEMODE_COMMIT:
+      case rawobj::kModeCommit:
         if (!last) return -ENOENT;  // cannot descend into a gitlink
         out->type = Node::Type::SubmoduleDir;
         out->commit_time = commit_time;
@@ -247,22 +253,23 @@ int Gitmount::walk_tree_locked(const git_oid& root_tree, const std::vector<std::
   return 0;
 }
 
-namespace {
-
-// Peel a ref target to its commit's root tree + committer time. Returns 0
-// or -ENOENT (+warning) for non-commit targets (RFC 0000 §3.1 unified rule).
-int peel_ref_to_root(GitRepo* repo, const git_oid& target, const std::string& refname_for_log,
-                     git_oid* root_out, std::int64_t* time_out) {
-  git_oid commit;
-  if (repo->peel_to_commit(target, &commit) != 0) {
+// Resolve a ref target (commit, or tag chain ending in a commit) to its
+// commit facts via the metadata cache. Returns 0, -ENOENT (+warning) for
+// non-commit targets (RFC 0000 §3.1 unified rule), or -EIO.
+int Gitmount::peel_ref_to_root_locked(const git_oid& target, const std::string& refname_for_log,
+                                      git_oid* root_out, std::int64_t* time_out) {
+  git_oid commit{};
+  rawobj::CommitFacts facts;
+  const int rc = commit_facts_locked(target, &commit, &facts);
+  if (rc == -EINVAL) {
     log::warn("ref %s does not peel to a commit; entry not presented", refname_for_log.c_str());
     return -ENOENT;
   }
-  repo->commit_committer_time(commit, time_out);
-  return repo->commit_root_tree(commit, root_out);
+  if (rc != 0) return rc;
+  *root_out = facts.root_tree;
+  *time_out = facts.committer_time;
+  return 0;
 }
-
-}  // namespace
 
 int Gitmount::resolve_head_locked(const std::vector<std::string>& tree_comps, Node* out) {
   const HeadInfo head = repo_->head();
@@ -279,7 +286,7 @@ int Gitmount::resolve_head_locked(const std::vector<std::string>& tree_comps, No
 
   git_oid root;
   std::int64_t when = 0;
-  const int rc = peel_ref_to_root(repo_.get(), target, "HEAD", &root, &when);
+  const int rc = peel_ref_to_root_locked(target, "HEAD", &root, &when);
   if (rc != 0) return rc;
   return walk_tree_locked(root, tree_comps, when, out);
 }
@@ -302,7 +309,7 @@ int Gitmount::resolve_ns_locked(const std::string& ref_ns_prefix,
 
     git_oid root;
     std::int64_t when = 0;
-    const int rc = peel_ref_to_root(repo_.get(), info->target, refname, &root, &when);
+    const int rc = peel_ref_to_root_locked(info->target, refname, &root, &when);
     if (rc != 0) return rc;
     out->ref_prefix = refname;  // merged nodes union their sub-refs (readdir)
 
@@ -367,7 +374,7 @@ int Gitmount::resolve_remote_locked(const std::vector<std::string>& comps, Node*
       auto info = repo_->lookup_ref(ns_prefix);
       git_oid root;
       std::int64_t when = 0;
-      const int rc = peel_ref_to_root(repo_.get(), info->target, ns_prefix, &root, &when);
+      const int rc = peel_ref_to_root_locked(info->target, ns_prefix, &root, &when);
       if (rc != 0) return rc;
       out->ref_prefix = ns_prefix;
       return walk_tree_locked(root, {}, when, out);
@@ -396,7 +403,7 @@ int Gitmount::resolve_remote_locked(const std::vector<std::string>& comps, Node*
 
     git_oid root;
     std::int64_t when = 0;
-    const int rc = peel_ref_to_root(repo_.get(), info->target, refname, &root, &when);
+    const int rc = peel_ref_to_root_locked(info->target, refname, &root, &when);
     if (rc != 0) return rc;
     out->ref_prefix = refname;
     return walk_tree_locked(root, std::vector<std::string>(comps.begin() + k, comps.end()), when,
@@ -409,7 +416,7 @@ int Gitmount::resolve_remote_locked(const std::vector<std::string>& comps, Node*
     auto info = repo_->lookup_ref(ns_prefix);
     git_oid root;
     std::int64_t when = 0;
-    const int rc = peel_ref_to_root(repo_.get(), info->target, ns_prefix, &root, &when);
+    const int rc = peel_ref_to_root_locked(info->target, ns_prefix, &root, &when);
     if (rc != 0) return rc;
     out->ref_prefix = ns_prefix;
     return walk_tree_locked(root, std::vector<std::string>(comps.begin() + 1, comps.end()), when,
@@ -472,12 +479,12 @@ int Gitmount::resolve_locked(const std::string& path, Node* out) {
           git_oid oid{};
           if (git_oid_fromstr(&oid, p.comps[0].c_str()) != 0) return -ENOENT;
           if (!repo_->is_commit_object(oid)) return -ENOENT;
-          std::int64_t when = 0;
-          repo_->commit_committer_time(oid, &when);
-          git_oid root;
-          if (repo_->commit_root_tree(oid, &root) != 0) return -ENOENT;
-          return walk_tree_locked(
-              root, std::vector<std::string>(p.comps.begin() + 1, p.comps.end()), when, out);
+          git_oid commit{};
+          rawobj::CommitFacts facts;
+          if (commit_facts_locked(oid, &commit, &facts) != 0) return -ENOENT;
+          return walk_tree_locked(facts.root_tree,
+                                  std::vector<std::string>(p.comps.begin() + 1, p.comps.end()),
+                                  facts.committer_time, out);
         }
       }
       return -ENOENT;
@@ -492,47 +499,46 @@ int Gitmount::resolve_locked(const std::string& path, Node* out) {
 void Gitmount::append_tree_entries_locked(const git_oid& tree,
                                           const std::string& ref_prefix_for_union,
                                           std::vector<DirEntry>* out) {
-  auto entries = repo_->tree_entries(tree);
-  if (!entries) return;
+  bool malformed = false;
+  auto data = tree_locked(tree, &malformed);
+  if (!data) return;
+  const git_oid_t oid_type = repo_->oid_type();
 
-  for (const auto& e : *entries) {
+  for (std::uint32_t off : data->offsets) {
+    auto e = rawobj::entry_at(*data, off, oid_type);
+    if (!e) return;
     // Hand-crafted trees may contain "." / ".."; skip (kernel synthesizes
     // them) and warn (RFC 0000 §3.1). Overlong names are skipped likewise.
-    if (e.name == "." || e.name == "..") {
-      log::warn("skipping pathological tree entry '%s' (reserved name)", e.name.c_str());
+    if (e->name == "." || e->name == "..") {
+      log::warn("skipping pathological tree entry '%.*s' (reserved name)",
+                static_cast<int>(e->name.size()), e->name.data());
       continue;
     }
-    if (e.name.size() > pathmap::kNameMax) {
-      log::warn("skipping overlong tree entry (%zu bytes > NAME_MAX)", e.name.size());
+    if (e->name.size() > pathmap::kNameMax) {
+      log::warn("skipping overlong tree entry (%zu bytes > NAME_MAX)", e->name.size());
       continue;
     }
     DirEntry de;
-    de.name = e.name;
-    switch (e.mode) {
-      case GIT_FILEMODE_TREE:
+    de.name.assign(e->name.data(), e->name.size());
+    switch (e->mode) {
+      case rawobj::kModeTree:
         de.mode = S_IFDIR;
         break;
-      case GIT_FILEMODE_BLOB:
-      case GIT_FILEMODE_BLOB_EXECUTABLE:
+      case rawobj::kModeBlob:
+      case rawobj::kModeExec:
         de.mode = S_IFREG;
         break;
-      case GIT_FILEMODE_LINK:
+      case rawobj::kModeLink:
         de.mode = S_IFLNK;
         break;
-      case GIT_FILEMODE_COMMIT: {
+      case rawobj::kModeCommit: {
         // Submodule: empty directory + marker file; a real entry shadowing
         // the marker name wins and the synthetic file is omitted (§3.2).
         de.mode = S_IFDIR;
         out->push_back(de);
-        const std::string marker = e.name + ".gitmount-submodule";
-        bool shadowed = false;
-        for (const auto& other : *entries) {
-          if (other.name == marker) {
-            shadowed = true;
-            break;
-          }
-        }
-        if (shadowed) {
+        const std::string marker = de.name + ".gitmount-submodule";
+        auto real = rawobj::tree_find(*data, marker, oid_type);
+        if (real) {
           log::warn("tree entry '%s' shadows synthetic submodule marker", marker.c_str());
         } else if (marker.size() <= pathmap::kNameMax) {
           out->push_back(DirEntry{marker, S_IFREG});
@@ -556,8 +562,7 @@ void Gitmount::append_tree_entries_locked(const git_oid& tree,
         if (de.name == first) {
           if (de.mode != S_IFDIR) {
             log::warn(
-                "folded ambiguity: tree entry '%s' and sub-ref render "
-                "as directory (sub-ref wins)",
+                "folded ambiguity: tree entry '%s' and sub-ref render as directory (sub-ref wins)",
                 first.c_str());
           }
           de.mode = S_IFDIR;
@@ -633,6 +638,120 @@ int Gitmount::list_dir_locked(const std::string&, const Node& node, std::vector<
     default:
       return -ENOTDIR;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Tier-2 metadata caches (RFC 0000 §3.5 as amended): raw tree bytes + a
+// 4-byte-per-entry offset index, and compact commit facts, under one
+// byte-exact budget. Misses read outside the single mutex (the same
+// segmented pattern as the blob cache), then re-check before inserting.
+// ---------------------------------------------------------------------------
+
+std::shared_ptr<const rawobj::TreeData> Gitmount::tree_locked(const git_oid& tree,
+                                                              bool* malformed) {
+  *malformed = false;
+  const std::string key = oid_to_hex(tree);
+  if (auto hit = meta_cache_.lookup(key)) {
+    if (hit->kind == MetaValue::Kind::Tree) return hit->tree;
+  }
+
+  mu_.unlock();
+  git_object_t type = GIT_OBJECT_ANY;
+  std::string buf;
+  int rc = repo_->read_object(tree, &type, &buf);
+  bool bad = false;
+  std::shared_ptr<const rawobj::TreeData> owned;
+  if (rc == 0 && type != GIT_OBJECT_TREE) rc = ENOENT;  // like git_tree_lookup
+  if (rc == 0) {
+    auto idx = rawobj::index_tree(buf.data(), buf.size(), repo_->oid_type());
+    if (!idx) {
+      bad = true;  // corrupt/hand-crafted garbage
+    } else {
+      auto td = std::make_shared<rawobj::TreeData>();
+      td->raw = std::move(buf);
+      td->offsets = std::move(*idx);
+      owned = std::move(td);
+    }
+  }
+  mu_.lock();
+
+  *malformed = bad;
+  if (rc != 0 || bad) return nullptr;
+  if (auto hit = meta_cache_.lookup(key)) {  // lost the race
+    if (hit->kind == MetaValue::Kind::Tree) return hit->tree;
+  }
+  auto mv = std::make_shared<MetaValue>();
+  mv->kind = MetaValue::Kind::Tree;
+  mv->tree = owned;
+  if (!meta_cache_.insert(key, mv, owned->cost()))
+    return owned;  // pathological tree at/over budget: serve uncached
+  return mv->tree;
+}
+
+int Gitmount::commit_facts_locked(const git_oid& target, git_oid* commit_out,
+                                  rawobj::CommitFacts* facts_out) {
+  const std::string key = oid_to_hex(target);
+  if (auto hit = meta_cache_.lookup(key)) {
+    if (hit->kind == MetaValue::Kind::CommitTuple) {
+      *commit_out = hit->commit_oid;
+      *facts_out = hit->commit;
+      return 0;
+    }
+  }
+
+  // Miss: read the object and walk the tag chain outside the lock.
+  mu_.unlock();
+  git_oid cur = target;
+  rawobj::CommitFacts facts;
+  int rc = 0;
+  bool ok = false;
+  for (int hop = 0; hop < 16; ++hop) {
+    git_object_t type = GIT_OBJECT_ANY;
+    std::string buf;
+    rc = repo_->read_object(cur, &type, &buf);
+    if (rc != 0) break;
+    if (type == GIT_OBJECT_COMMIT) {
+      auto f = rawobj::parse_commit(buf.data(), buf.size(), repo_->oid_type());
+      if (!f) {
+        rc = EIO;  // malformed commit object
+        break;
+      }
+      facts = *f;
+      ok = true;
+      break;
+    }
+    if (type == GIT_OBJECT_TAG) {
+      auto next = rawobj::parse_tag(buf.data(), buf.size(), repo_->oid_type());
+      if (!next) {
+        rc = EIO;
+        break;
+      }
+      cur = *next;
+      continue;
+    }
+    rc = EINVAL;  // tree/blob: non-commit target (§3.1 unified rule)
+    break;
+  }
+  if (!ok && rc == 0) rc = EINVAL;  // tag chain too deep
+  mu_.lock();
+
+  if (rc != 0) return -rc;
+  if (auto hit = meta_cache_.lookup(key)) {  // lost the race
+    if (hit->kind == MetaValue::Kind::CommitTuple) {
+      *commit_out = hit->commit_oid;
+      *facts_out = hit->commit;
+      return 0;
+    }
+  }
+  auto mv = std::make_shared<MetaValue>();
+  mv->kind = MetaValue::Kind::CommitTuple;
+  mv->commit_oid = cur;
+  mv->commit = facts;
+  // Charged payload: root-tree oid + timestamp + resolved commit oid.
+  meta_cache_.insert(key, mv, 3 * sizeof(git_oid) + sizeof(std::int64_t));
+  *commit_out = cur;
+  *facts_out = facts;
+  return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -774,8 +893,9 @@ int Gitmount::open_commits(std::shared_ptr<const std::string>* out) {
     for (const auto& name : names) {
       auto info = repo_->lookup_ref(name);
       if (!info) continue;
-      git_oid commit;
-      if (repo_->peel_to_commit(info->target, &commit) != 0) {
+      git_oid commit{};
+      rawobj::CommitFacts facts;
+      if (commit_facts_locked(info->target, &commit, &facts) != 0) {
         log::vlog("commits list: skipping non-commit ref %s", name.c_str());
         continue;
       }
@@ -788,8 +908,9 @@ int Gitmount::open_commits(std::shared_ptr<const std::string>* out) {
         auto ref = repo_->lookup_ref(head.symbolic_target);
         if (ref) target = ref->target;
       }
-      git_oid commit;
-      if (repo_->peel_to_commit(target, &commit) == 0)
+      git_oid commit{};
+      rawobj::CommitFacts facts;
+      if (commit_facts_locked(target, &commit, &facts) == 0)
         pushes.push_back(commit);
       else
         log::vlog("commits list: HEAD does not peel to a commit, skipped");
@@ -825,16 +946,12 @@ std::string Gitmount::submodule_marker_content_locked(const git_oid& commit_tree
                                                       const std::string& name,
                                                       const git_oid& gitlink_oid) {
   std::string url;
-  auto root = repo_->tree_entries(commit_tree);
+  bool malformed = false;
+  auto root = tree_locked(commit_tree, &malformed);
   const git_oid* modules_oid = nullptr;
   if (root) {
-    for (const auto& e : *root) {
-      if (e.name == ".gitmodules" &&
-          (e.mode == GIT_FILEMODE_BLOB || e.mode == GIT_FILEMODE_BLOB_EXECUTABLE)) {
-        modules_oid = &e.oid;
-        break;
-      }
-    }
+    auto e = rawobj::tree_find(*root, ".gitmodules", repo_->oid_type());
+    if (e && (e->mode == rawobj::kModeBlob || e->mode == rawobj::kModeExec)) modules_oid = &e->oid;
   }
   if (!modules_oid) {
     log::warn("no .gitmodules at commit root for submodule '%s'", name.c_str());

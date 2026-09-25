@@ -530,20 +530,18 @@ values are usage errors (exit status 1); there is no artificial upper
 cap (bounded only by available memory).
 .TP
 .BI \-\-tree\-cache\-size \ MiB
-Total budget of the libgit2 object cache (trees and commits) in MiB
-(default 256).
-libgit2 accounts cached objects by their serialized size, while the
-in\-memory parsed representation is several times larger (commit
-signatures, tree entry arrays, duplicated names): expect the real
-footprint of a full budget to be roughly 4\-6x the configured value on
-large histories.
-Together with mmap'ed packfile pages (file\-backed, shared between
-processes and reclaimable under pressure), the daemon's RSS therefore
-exceeds the configured totals.
-Measured on a 612,588\-commit, 183,425\-file repository: the defaults
-settle near 2.1 GB RSS, of which roughly 1.2 GB tracks the 256 MiB
-tree/commit budget \(em tune this knob first on memory\-constrained
-machines.
+Byte\-exact budget of gitmount's own metadata cache in MiB (default
+256): trees are held as raw serialized bytes plus a 4\-byte\-per\-entry
+offset index (entry names are zero\-copy views into the buffer), and
+commits as compact facts tuples (root tree oid + committer time, with
+tag chains resolved on demand).
+Fixed per\-entry bookkeeping is charged against the budget too, so the
+configured value is the real cap of this component (libgit2's parsed
+object cache is fully disabled).
+Together with mmap'ed packfile pages (file\-backed, shared and
+reclaimable under pressure) and the st_ino registry, the daemon's RSS
+therefore exceeds the sum of the two cache knobs — but each part is
+bounded and accounted.
 Validation is identical to
 .BR \-\-blob\-cache\-size .
 Tree/commit metadata is served from this separate internal cache and is

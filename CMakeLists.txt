@@ -108,7 +108,8 @@ add_library(gitmount_core STATIC
   src/ino_registry.cpp
   src/log.cpp
   src/options.cpp
-  src/path_map.cpp)
+  src/path_map.cpp
+  src/rawobj.cpp)
 target_include_directories(gitmount_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(gitmount_core
   PUBLIC PkgConfig::FUSE3 ${GITMOUNT_LIBGIT2_TARGET} Threads::Threads
@@ -143,6 +144,7 @@ if(GITMOUNT_BUILD_TESTS)
     tests/unit/test_ino_registry.cpp
     tests/unit/test_options.cpp
     tests/unit/test_gitmodules.cpp
+    tests/unit/test_rawobj.cpp
     tests/unit/test_gitmount_util.cpp)
   target_link_libraries(gitmount_tests
     PRIVATE gitmount_core Catch2::Catch2WithMain gitmount_warnings)

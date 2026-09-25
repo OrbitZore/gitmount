@@ -261,14 +261,12 @@ The sharp edges pinned by the design (full contract:
   `git --no-replace-objects`.
 - **st_ino is path-derived and never recycled** — budget tens of MB per
   million distinct touched paths.
-- **Cache limits bound payload bytes, not RSS** — the daemon's resident
-  set additionally contains parsed tree/commit metadata (several times
-  the configured `--tree-cache-size` on huge histories), per-entry
-  bookkeeping and mmap'd packfile pages (file-backed, reclaimable).
-  Measured on llvm-project (612k commits, 183k files): defaults settle
-  near 2.1 GB RSS, of which ~1.2 GB tracks the 256 MiB tree/commit
-  budget. Tune `--tree-cache-size` first on memory-constrained
-  machines.
+- **Cache limits are byte-exact** — `--blob-cache-size` and
+  `--tree-cache-size` bound their caches precisely (metadata is cached
+  as raw bytes + a tiny index, not parsed objects). RSS additionally
+  contains the st_ino registry (~230 B per touched path) and mmap'd
+  packfile pages (file-backed, reclaimable). Tune `--tree-cache-size`
+  first on memory-constrained machines.
 
 ## FAQ
 

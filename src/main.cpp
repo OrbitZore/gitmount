@@ -88,7 +88,7 @@ int main(int argc, char** argv) {
   }
 
   libgit2_global_init();
-  libgit2_configure_cache(opts.tree_cache_bytes);
+  libgit2_configure_cache();
 
   // ---- repository validation (exit code 2 path, RFC 0000 §3.7) ----------
   std::string abs_repo;

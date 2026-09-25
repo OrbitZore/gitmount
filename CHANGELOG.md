@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Tier-2 metadata caches: gitmount now caches trees as raw serialized
+  bytes plus a 4-byte-per-entry offset index (zero-copy entry names,
+  git-order binary search) and commits as compact facts tuples (root
+  tree + committer time, tag chains resolved on demand), under one
+  byte-exact `--tree-cache-size` budget. libgit2's parsed-object cache
+  (accounted by serialized size, resident at 1.4-1.7x for trees and
+  more for commits) is fully disabled. Measured: the metadata budget
+  now holds within ~5% of its configured value; lookups stay within
+  the §3.5 performance guardrails (grep +4.5%, find +12% on the
+  synthetic walk benchmark).
 ### Fixed
 - A mountpoint that is a regular file is now rejected up front with a
 clear error (exit 1, also under `-f`); previously libfuse accepted the

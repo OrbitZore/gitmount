@@ -25,8 +25,11 @@
 
 #include <cstddef>
 #include <list>
+#include <memory>
 #include <string>
 #include <unordered_map>
+
+#include "rawobj.hpp"
 
 namespace gitmount {
 
@@ -84,6 +87,86 @@ class BlobLruCache {
   std::size_t capacity_;
   std::size_t bytes_ = 0;
   std::list<Entry> lru_;  // front = most recently used
+  std::unordered_map<std::string, std::list<Entry>::iterator> index_;
+};
+
+// ---------------------------------------------------------------------------
+// Metadata cache (Tier-2, RFC 0000 §3.5 as amended): raw tree bytes plus a
+// 4-byte-per-entry offset index, and compact commit-fact tuples, under one
+// byte-exact budget. Unlike libgit2's parsed-object cache (accounted by
+// serialized size but resident at 3-5x), every counted byte here exists.
+// ---------------------------------------------------------------------------
+
+struct MetaValue {
+  enum class Kind { Tree, CommitTuple };
+  Kind kind = Kind::Tree;
+  std::shared_ptr<const rawobj::TreeData> tree;  // Kind::Tree (zero-copy)
+  rawobj::CommitFacts commit{};                  // Kind::CommitTuple
+  git_oid commit_oid{};                          // Kind::CommitTuple: resolved commit object
+};
+
+// Per-entry fixed bookkeeping charged against the budget (LRU list node,
+// hash node, shared_ptr control block) — part of the honest accounting.
+constexpr std::size_t kMetaFixedCost = 128;
+
+class MetaLruCache {
+ public:
+  explicit MetaLruCache(std::size_t capacity_bytes) : capacity_(capacity_bytes) {}
+
+  std::size_t capacity() const { return capacity_; }
+  std::size_t bytes() const { return bytes_; }
+  std::size_t entries() const { return index_.size(); }
+
+  // Returns a null shared_ptr on miss; hits refresh recency. The returned
+  // pointer stays alive for the caller even if the entry is later evicted.
+  std::shared_ptr<const MetaValue> lookup(const std::string& key) {
+    auto it = index_.find(key);
+    if (it == index_.end()) return nullptr;
+    lru_.splice(lru_.begin(), lru_, it->second);
+    return lru_.front().value;
+  }
+
+  // cost = fixed bookkeeping + payload (raw bytes + offset index for
+  // trees, the facts tuple for commits). Entries whose cost >= the
+  // capacity are refused (mirroring the blob cache's >= boundary) and
+  // never evict existing entries.
+  bool insert(const std::string& key, std::shared_ptr<const MetaValue> value,
+              std::size_t payload_cost) {
+    const std::size_t cost = kMetaFixedCost + payload_cost;
+    if (cost >= capacity_) return false;
+    auto it = index_.find(key);
+    if (it != index_.end()) {
+      bytes_ -= it->second->cost;
+      lru_.erase(it->second);
+      index_.erase(it);
+    }
+    while (bytes_ + cost > capacity_ && !lru_.empty()) {
+      bytes_ -= lru_.back().cost;
+      index_.erase(lru_.back().key);
+      lru_.pop_back();
+    }
+    lru_.push_front(Entry{key, std::move(value), cost});
+    bytes_ += cost;
+    index_[key] = lru_.begin();
+    return true;
+  }
+
+  void clear() {
+    lru_.clear();
+    index_.clear();
+    bytes_ = 0;
+  }
+
+ private:
+  struct Entry {
+    std::string key;
+    std::shared_ptr<const MetaValue> value;
+    std::size_t cost = 0;
+  };
+
+  std::size_t capacity_;
+  std::size_t bytes_ = 0;
+  std::list<Entry> lru_;
   std::unordered_map<std::string, std::list<Entry>::iterator> index_;
 };
 

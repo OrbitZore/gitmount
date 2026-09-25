@@ -501,24 +501,27 @@ commit 解析为一个 commit 对象，
   pack 中途失效 → `EIO`），不产生钉住句柄。**每次全量解压记一条
   verbose 日志（解压计数）**——超限 open-pin 与缓存 miss 装载各
   一条，为"只解压一次"提供直接可观测钩子（§5 断言用）。
-- **tree/commit 依赖 libgit2 内置对象缓存，init 时显式调参**：默
-  认 per-type 上限仅 4KiB（源码 `cache.c` 的
-  `git_cache__max_object_size[]`），序列化超线的大目录 tree（~100+
-  entry 即超）不进缓存；而高层 fuse API 每个 syscall 自 root tree
-  重解析 O(depth) 次、attr/entry_timeout 又显式置 0（见下），tree
-  命中率就是 `ls -R`/`find`/`du`/rsync 类元数据负载性能的全部。
-  故 init 时以 `GIT_OPT_SET_CACHE_OBJECT_LIMIT(GIT_OBJECT_TREE,
-  1MiB)` 抬线，COMMIT 同抬（commit 天然 <4KiB，仅防御病态巨型
-  merge commit，无代价）；总预算 `GIT_OPT_SET_CACHE_MAX_SIZE` 设
-  为 `--tree-cache-size` 的值（默认 256MiB），与
-  `--blob-cache-size` **各自独立记账、互不挤占**，校验规则相同
-  （3.7）。
+- **元数据缓存自管（Tier-2，libgit2 解析缓存弃用）**：高层 fuse
+  API 每个 syscall 自 root tree 重解析 O(depth) 次、attr/
+  entry_timeout 又显式置 0（见下），tree 命中率就是 `ls -R`/
+  `find`/`du`/rsync 类元数据负载性能的全部。libgit2 内置对象缓存
+  按序列化字节记账、驻留解析后对象（原始缓冲整块保留 + 每
+  entry ~52B 结构，实测树放大 1.4–1.7x、commit 含签名与消息
+  strdup 更甚），预算语义失真。故自管元数据缓存取而代之：tree
+  以原始序列化字节 + 4B/entry 偏移索引驻留（条目名零拷贝，查找
+  小树线性、大树按 git 树序二分），commit 以紧凑元组（root
+  tree oid + committer time）驻留、tag 链即时解析；libgit2 对象
+  缓存三类型 per-type 上限钉 0，其职责收敛为 ODB 解压引擎、
+  refdb 与 revwalk。`--tree-cache-size`（默认 256MiB）为该缓存
+  字节精确的总预算（记账含固定簿记开销），与
+  `--blob-cache-size` 各自独立、互不挤占，校验规则相同（3.7）；
+  miss 装载与 blob 同款锁分段（3.4 例外三）。
 - **blob 保证不进 libgit2 缓存（防双层缓存）**：per-type 上限默认
   即 0（从不缓存），但这是默认值而非契约——任何一处
   `GIT_OPT_SET_CACHE_OBJECT_LIMIT(GIT_OBJECT_BLOB, n>0)` 都会让同
-  一份字节在 libgit2 缓存与自家 LRU 各存一份、双份记账。故 init
-  显式写死 `GIT_OPT_SET_CACHE_OBJECT_LIMIT(GIT_OBJECT_BLOB, 0)`，
-  令"恰好不重复"成为"保证不重复"。pack 读入走 packfile mmap →
+  一份字节在 libgit2 缓存与自家 LRU 各存一份、双份记账。元数据
+  缓存自管后三类型上限一并钉 0（BLOB 同此），对象缓存整体失
+  效，恰好不重复升格为全类型保证不重复。
   内核页缓存，进程间共享、可回收，属正常分层而非堆内重复；
   `GIT_OPT_ENABLE_CACHING` 保持默认开启（libgit2 公开 API 即此，
   不存在按 odb 实例设置缓存的接口）。

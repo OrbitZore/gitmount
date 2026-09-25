@@ -136,8 +136,12 @@ hashes).
   open file description.
 - Every full blob decompression logs one verbose line — the observable
   hook for the "decompress exactly once per open" guarantee.
-- Trees and commits use libgit2's object cache with a 1 MiB per-type
-  limit and a total budget of `--tree-cache-size` (default 256 MiB).
+- Trees and commits live in gitmount's own metadata cache with a
+  byte-exact budget of `--tree-cache-size` (default 256 MiB): raw
+  serialized tree bytes + a 4-byte-per-entry offset index (zero-copy
+  entry names), and compact commit-fact tuples; libgit2's parsed object
+  cache is disabled entirely (it accounted serialized bytes while
+  resident at 1.4-1.7x for trees and more for commits).
 - Metadata timeouts are 0 (`attr_timeout=0`, `entry_timeout=0`): a moved
   or deleted ref is visible immediately. `-o kernel_cache` enables page
   cache reuse across opens (safe for immutable blobs) without affecting
@@ -145,31 +149,28 @@ hashes).
 
 ### Memory accounting
 
-The cache knobs bound **accounted payload bytes**, not the daemon's
-resident set. Three additional components land in RSS:
+`--blob-cache-size` and `--tree-cache-size` bound their caches
+**byte-exactly** (fixed per-entry bookkeeping included). The daemon's
+resident set additionally contains:
 
-1. **Parsed metadata amplification** — libgit2 accounts cached trees
-   and commits by serialized size but stores the parsed representation
-   (commit signatures, tree entry arrays, duplicated names), roughly
-   4–6x the accounted bytes on large histories. This dominates on
-   commit-heavy repositories.
-2. **Allocator retention** — large, frequently recycled payloads can
-   strand heap in per-thread arenas. gitmount pins glibc's mmap
-   threshold at startup so multi-megabyte payloads are always mmap'd
-   and returned to the OS on release (previously the dynamic threshold
-   made arena retention grow ~3x the blob cache under concurrent
-   churn; fixed in 0.0.2).
+1. **The st_ino registry** — ~230 bytes per distinct touched path; on a
+   183k-path sweep ≈ 42 MB. Never recycled within a mount (§6).
+2. **Allocator retention** — mitigated: gitmount pins glibc's mmap
+   threshold at startup so multi-megabyte payloads are mmap'd and
+   returned to the OS on release (before this, arena retention grew
+   ~3x the blob cache under concurrent churn; the stress report that
+   measured 2.1 GB RSS ran 0.0.1, which predates the fix).
 3. **File-backed packfile pages** — libgit2 reads packs through mmap;
    touched pages are resident (counted in RSS) but shared between
    processes and reclaimed under memory pressure. This is page cache,
    not memory commitment.
 
-Reference points: llvm-project (612,588 commits / 183,425 files /
-2.28 GB of blobs) settles at ≈ 2.1 GB RSS with defaults (blob 64 MiB +
-tree 256 MiB), ≈ 1.2 GB with `--blob-cache-size=4`; on a synthetic
-churn workload (40 × 4 MiB blobs, 32 MiB cache, 8 readers) anonymous
-memory is ≈ 1.1× the configured cache after the allocator fix, with
-≈ 160 MB of reclaimable file-backed pages for the 160 MB packfile.
+Measured (Tier-2 caches, synthetic 17.3 MiB-tree repository, 400k
+stats): anonymous memory ≈ blob cache + tree cache × 1.05 + registry +
+~25 MB base — the metadata budget holds within 5% of its configured
+value. On the pre-Tier-2 libgit2 cache the same trees resident at
+~1.4–1.7x serialized size, and parsed commits higher still.
+
 Tune `--tree-cache-size` first on memory-constrained machines.
 
 ## 8. Read-only enforcement

@@ -29,12 +29,6 @@ std::vector<std::pair<std::string, std::string>> parse_gitmodules(const std::str
 // Hex string of an oid (lowercase; sha1=40 / sha256=64 chars).
 std::string oid_to_hex(const git_oid& oid);
 
-struct TreeEntry {
-  std::string name;
-  git_filemode_t mode = GIT_FILEMODE_UNREADABLE;
-  git_oid oid{};
-};
-
 struct RefInfo {
   git_oid target{};  // direct target (symbolic refs resolved through)
   bool symbolic = false;
@@ -68,23 +62,19 @@ class GitRepo {
   HeadInfo head();
 
   // ---- objects -----------------------------------------------------------
-  // 0 on success, else an errno (via git_to_errno). peel failure (tag chain
-  // ending in tree/blob) yields EINVAL — callers treat it as the "non-commit
-  // ref target" case of RFC 0000 §3.1.
-  int peel_to_commit(const git_oid& target, git_oid* commit_out);
-  int commit_committer_time(const git_oid& commit, std::int64_t* time_out);
-  int commit_root_tree(const git_oid& commit, git_oid* tree_out);
+
+  // Generic raw object read (decompresses on every call; caching is
+  // gitmount's job): 0 on success with the object type and bytes, else
+  // errno via git_to_errno.
+  int read_object(const git_oid& oid, git_object_t* type_out, std::string* out);
+
+  // The repository's hash type (sha1 / sha256) for raw object parsing.
+  git_oid_t oid_type() const { return oid_type_; }
 
   // Whether the ODB holds an object with exactly type COMMIT at this oid.
   // Returns false for missing objects and non-commit types alike (§3.1:
   // /commit/<oid> does no peeling).
   bool is_commit_object(const git_oid& oid);
-
-  // Tree enumeration/lookup. tree_entries returns raw entries (including
-  // pathological "." / ".." names and overlong names — filtering and warning
-  // is policy in gitmount.cpp).
-  std::optional<std::vector<TreeEntry>> tree_entries(const git_oid& tree);
-  std::optional<TreeEntry> tree_entry(const git_oid& tree, const std::string& name);
 
   // Header-only size lookup for blobs (no full decompression, RFC 0000
   // §3.2/§3.5). 0 on success; ENOENT when the object is missing.
@@ -120,6 +110,7 @@ class GitRepo {
   };
   std::unique_ptr<git_repository, FreeRepository> repo_;
   std::string gitdir_;
+  git_oid_t oid_type_ = GIT_OID_SHA1;
 };
 
 // Process-wide libgit2 setup/teardown (main.cpp owns the lifetime; repo
@@ -127,9 +118,11 @@ class GitRepo {
 void libgit2_global_init();
 void libgit2_global_shutdown();
 
-// Apply RFC 0000 §3.5 cache tuning: tree/commit per-type limit raised to
-// 1 MiB, blob per-type limit pinned to 0 (no double caching with gitmount's
-// own LRU), total budget = tree_cache_bytes.
-void libgit2_configure_cache(std::uint64_t tree_cache_bytes);
+// Apply RFC 0000 §3.5 cache tuning (as amended for the Tier-2 metadata
+// caches): libgit2's parsed-object cache is fully disabled (blob, tree and
+// commit per-type limits all pinned to 0) — gitmount caches raw tree bytes
+// and compact commit facts itself, byte-accounted. libgit2 remains the ODB
+// decompression engine, refdb and revwalk provider.
+void libgit2_configure_cache();
 
 }  // namespace gitmount

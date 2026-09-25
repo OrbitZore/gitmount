@@ -21,15 +21,14 @@ void libgit2_global_init() { git_libgit2_init(); }
 
 void libgit2_global_shutdown() { git_libgit2_shutdown(); }
 
-void libgit2_configure_cache(std::uint64_t tree_cache_bytes) {
-  // RFC 0000 §3.5: raise the tree per-type limit (default 4 KiB starves
-  // serialized trees), raise COMMIT alongside (defensive, no cost), pin
-  // BLOB to 0 so libgit2 never caches blob bytes that gitmount's own LRU
-  // already accounts for, and set the total budget to the user's value.
-  git_libgit2_opts(GIT_OPT_SET_CACHE_OBJECT_LIMIT, GIT_OBJECT_TREE, static_cast<size_t>(1) << 20);
-  git_libgit2_opts(GIT_OPT_SET_CACHE_OBJECT_LIMIT, GIT_OBJECT_COMMIT, static_cast<size_t>(1) << 20);
+void libgit2_configure_cache() {
+  // RFC 0000 §3.5 (as amended): libgit2's parsed-object cache is fully
+  // disabled — gitmount's Tier-2 metadata cache holds raw tree bytes and
+  // compact commit facts instead, byte-accounted. libgit2 remains the ODB
+  // decompression engine, refdb and revwalk provider.
   git_libgit2_opts(GIT_OPT_SET_CACHE_OBJECT_LIMIT, GIT_OBJECT_BLOB, static_cast<size_t>(0));
-  git_libgit2_opts(GIT_OPT_SET_CACHE_MAX_SIZE, tree_cache_bytes);
+  git_libgit2_opts(GIT_OPT_SET_CACHE_OBJECT_LIMIT, GIT_OBJECT_TREE, static_cast<size_t>(0));
+  git_libgit2_opts(GIT_OPT_SET_CACHE_OBJECT_LIMIT, GIT_OBJECT_COMMIT, static_cast<size_t>(0));
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +166,7 @@ std::unique_ptr<GitRepo> GitRepo::open(const std::string& path, std::string* err
   auto out = std::unique_ptr<GitRepo>(new GitRepo());
   out->repo_.reset(repo);
   out->gitdir_ = git_repository_path(repo);
+  out->oid_type_ = git_repository_oid_type(repo);
   return out;
 }
 
@@ -246,37 +246,6 @@ HeadInfo GitRepo::head() {
   return info;
 }
 
-int GitRepo::peel_to_commit(const git_oid& target, git_oid* commit_out) {
-  git_object* obj = nullptr;
-  int rc = git_object_lookup(&obj, repo_.get(), &target, GIT_OBJECT_ANY);
-  if (rc != 0) return git_to_errno(rc);
-  ObjectPtr guard(obj);
-  git_object* peeled = nullptr;
-  rc = git_object_peel(&peeled, obj, GIT_OBJECT_COMMIT);
-  if (rc != 0) return git_to_errno(rc);  // EINVAL for tag->blob/tree chains
-  ObjectPtr pguard(peeled);
-  *commit_out = *git_object_id(peeled);
-  return 0;
-}
-
-int GitRepo::commit_committer_time(const git_oid& commit, std::int64_t* time_out) {
-  git_commit* c = nullptr;
-  int rc = git_commit_lookup(&c, repo_.get(), &commit);
-  if (rc != 0) return git_to_errno(rc);
-  CommitPtr guard(c);
-  *time_out = static_cast<std::int64_t>(git_commit_committer(c)->when.time);
-  return 0;
-}
-
-int GitRepo::commit_root_tree(const git_oid& commit, git_oid* tree_out) {
-  git_commit* c = nullptr;
-  int rc = git_commit_lookup(&c, repo_.get(), &commit);
-  if (rc != 0) return git_to_errno(rc);
-  CommitPtr guard(c);
-  *tree_out = *git_commit_tree_id(c);
-  return 0;
-}
-
 bool GitRepo::is_commit_object(const git_oid& oid) {
   git_odb* odb = nullptr;
   if (git_repository_odb(&odb, repo_.get()) != 0) return false;
@@ -285,38 +254,6 @@ bool GitRepo::is_commit_object(const git_oid& oid) {
   int rc = git_odb_read_header(&len, &type, odb, &oid);
   git_odb_free(odb);
   return rc == 0 && type == GIT_OBJECT_COMMIT;
-}
-
-std::optional<std::vector<TreeEntry>> GitRepo::tree_entries(const git_oid& tree) {
-  git_tree* t = nullptr;
-  if (git_tree_lookup(&t, repo_.get(), &tree) != 0) return std::nullopt;
-  TreePtr guard(t);
-  std::vector<TreeEntry> out;
-  const size_t n = git_tree_entrycount(t);
-  out.reserve(n);
-  for (size_t i = 0; i < n; ++i) {
-    const git_tree_entry* e = git_tree_entry_byindex(t, i);
-    if (!e) continue;
-    TreeEntry te;
-    te.name = git_tree_entry_name(e);
-    te.mode = git_tree_entry_filemode(e);
-    te.oid = *git_tree_entry_id(e);
-    out.push_back(std::move(te));
-  }
-  return out;
-}
-
-std::optional<TreeEntry> GitRepo::tree_entry(const git_oid& tree, const std::string& name) {
-  git_tree* t = nullptr;
-  if (git_tree_lookup(&t, repo_.get(), &tree) != 0) return std::nullopt;
-  TreePtr guard(t);
-  const git_tree_entry* e = git_tree_entry_byname(t, name.c_str());
-  if (!e) return std::nullopt;
-  TreeEntry te;
-  te.name = git_tree_entry_name(e);
-  te.mode = git_tree_entry_filemode(e);
-  te.oid = *git_tree_entry_id(e);
-  return te;
 }
 
 int GitRepo::blob_size(const git_oid& oid, std::uint64_t* size_out) {
@@ -340,6 +277,21 @@ int GitRepo::read_blob(const git_oid& oid, std::string* out) {
   git_odb_free(odb);
   if (rc != 0) return git_to_errno(rc);
   OdbObjectPtr guard(obj);
+  const char* data = static_cast<const char*>(git_odb_object_data(obj));
+  const size_t size = git_odb_object_size(obj);
+  out->assign(data, size);
+  return 0;
+}
+
+int GitRepo::read_object(const git_oid& oid, git_object_t* type_out, std::string* out) {
+  git_odb* odb = nullptr;
+  if (git_repository_odb(&odb, repo_.get()) != 0) return EIO;
+  git_odb_object* obj = nullptr;
+  int rc = git_odb_read(&obj, odb, &oid);
+  git_odb_free(odb);
+  if (rc != 0) return git_to_errno(rc);
+  OdbObjectPtr guard(obj);
+  if (type_out) *type_out = git_odb_object_type(obj);
   const char* data = static_cast<const char*>(git_odb_object_data(obj));
   const size_t size = git_odb_object_size(obj);
   out->assign(data, size);
