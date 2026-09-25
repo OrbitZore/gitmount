@@ -2,7 +2,7 @@
 
 - RFC 编号: 0000
 - 标题: gitfs — read-only git-to-FUSE 文件系统
-- 状态： Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6、§7.7、§7.8、§7.9、§7.10、§7.11、§7.12、§7.13、§7.14、§7.15、§7.16、§7.17、§7.18、§7.19、§7.20、§7.21、§7.22、§7.23、§7.24、§7.25（§7.11–§7.15 为定稿后 mount(8) 助手协议核验勘误，§7.16 为定稿后收尾勘误，§7.17 为定稿后边缘口径钉住，§7.18 为定稿后病理形态钉住，§7.19 为定稿后收尾口径补钉，§7.20 为定稿后复核钉缝，§7.21 为定稿后复核钉缝二轮，§7.22 为定稿后复核钉缝三轮，§7.23 为定稿后复核钉缝四轮，§7.24 为定稿后复核钉缝五轮，§7.25 为定稿后复核钉缝六轮））
+- 状态： Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6、§7.7、§7.8、§7.9、§7.10、§7.11、§7.12、§7.13、§7.14、§7.15、§7.16、§7.17、§7.18、§7.19、§7.20、§7.21、§7.22、§7.23、§7.24、§7.25、§7.26（§7.11–§7.15 为定稿后 mount(8) 助手协议核验勘误，§7.16 为定稿后收尾勘误，§7.17 为定稿后边缘口径钉住，§7.18 为定稿后病理形态钉住，§7.19 为定稿后收尾口径补钉，§7.20 为定稿后复核钉缝，§7.21 为定稿后复核钉缝二轮，§7.22 为定稿后复核钉缝三轮，§7.23 为定稿后复核钉缝四轮，§7.24 为定稿后复核钉缝五轮，§7.25 为定稿后复核钉缝六轮，§7.26 为定稿后复核钉缝七轮））
 - 日期: 2026-09-24
 - 目标版本: 0.1.0
 
@@ -178,9 +178,9 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   分量**参与并集——多分量子 ref 如 `refs/tags/foo/feature/x` 以
   `feature` 入列、其下再按嵌套 ref 规则分组渲染，Q35c），同名
   （tree 恰含 entry `bar` 且子 ref 亦名 `bar`）按子 ref 折叠为目
-  录——与父目录折叠口径一致；若 ref `foo` 为非 commit 目标，该节点按本节统一
-  口径 lookup → `ENOENT`，与父目录 readdir 仍渲染折叠目录项形成
-  形状失配——**以查找口径为准**（目录项仅为枚举线索、不构成可访问
+  录——与父目录折叠口径一致；若 ref `foo` 为非 commit 目标，该节点按
+  本节统一口径 lookup → `ENOENT`，与父目录 readdir 仍渲染折叠目录项
+  形成形状失配——**以查找口径为准**（目录项仅为枚举线索、不构成可访问
   性承诺），失配同样记警告日志；分组前缀节点与完整 ref 节点均为
   目录，getattr 语义一致——完整 ref 节点即其 root tree（元数据按
   tree 目录口径，mtime = 所属 commit 的 committer time，见 3.2）；
@@ -936,9 +936,13 @@ gitfs/
     参考断言：超限 blob open 解压期间并发的根 readdir 不被长时
     间阻塞（自管 runner、宽松阈值），见 3.4/Q18a）；getattr 零解压
     断言：`-v` 挂载下对含大 blob 的目录做 `ls -l`（getattr 全遍历，
-    断言限定**不含 symlink 的目录**——fixture 的 symlink 条目按
-    Q27a/Q28b 合法触发内容读取乃至全量扫描、不在本断言范围，
-    Q35a），verbose 日志不出现任何解压事件（普通 blob 尺寸经
+    断言限定**不含 symlink 与 `.gitfs-submodule` 合成项（子模块条
+    目）的目录**——fixture 的 symlink 条目按 Q27a/Q28b 合法触发
+    内容读取乃至全量扫描，`.gitfs-submodule` 条目的内容与
+    `st_size` 须读 commit 树根 `.gitmodules` blob（见 3.2）、新挂
+    载下缓存 miss 装载解压同记一条 verbose 日志（见 3.5），含任
+    一者的目录均不在本断言范围，Q35a/Q36a），verbose 日志不出现
+    任何解压事件（普通 blob 尺寸经
     header-only 读取获得、getattr 不触发全量解压，见 3.2/Q19b，
     与“getattr 不触发 revwalk”断言同构）；可缓存 LRU 装载的锁分
     段另设可选参考
@@ -1222,10 +1226,14 @@ gitfs/
   判定一律经此获得，getattr/open 不为取 size 触发 blob 全量解压
   ——与 §3.3 已钉住的“getattr 不触发 revwalk”同构补全；§4 增
   “getattr 不产生解压日志”断言（`-v` 下 `ls -l` 含大 blob 目录、
-  解压事件计数为 0；该断言经 §7.25(a)/Q35 限定目录不含 symlink
+  解压事件计数为 0；该断言经 §7.25(a)/Q35 与 §7.26(a)/Q36 限定
+  目录不含 symlink 与 `.gitfs-submodule` 合成项
   ——symlink 的 st_size 按 §7.17(a)/Q27a 须读内容定位 NUL、病理
   形态按 §7.18(b)/Q28b 须全量扫描，含 symlink 的目录合法触发
-  解压，且 §3.3 getattr 行同步补 symlink 例外半句）；man 页
+  解压，且 §3.3 getattr 行同步补 symlink 例外半句；子模块条目
+  的说明文件内容与 st_size 须读树根 `.gitmodules` blob、新挂
+  载下缓存 miss 装载解压同记一条日志（见 3.2/3.5），含其的目
+  录同样合法触发解压）；man 页
   File metadata 与 `--blob-cache-size`
   描述同步。
 
@@ -1739,12 +1747,14 @@ gitfs/
   而 §3.2 已改"普通 blob 的尺寸一律 header-only"并将 symlink
   列为显式例外（Q27a 须读内容定位 NUL、Q28b 病理形态须全量扫
   描）——正是 Q30b 为 readdir 行修复的同款"表格行自包含"缺口。
-  钉住：行内主语改"普通 blob"并内联 symlink 例外半句；连带 §4
-  "getattr 零解压"断言限定"不含 symlink 的目录"——fixture 含
+  钉住：行内主语改“普通 blob”并内联 symlink 例外半句；连带 §4
+  “getattr 零解压”断言限定“不含 symlink 的目录”——fixture 含
   symlink，遍历含 symlink 的目录时其 lstat 按 Q27a/Q28b 合法触
   发解压、断言原文会误报；§7.9(b) 勘误链注记；man 页 File
   metadata 已含 symlink 例外让步（Q27a/Q28b 两处原文已同步），
-  无须再动；
+  无须再动（该限定语经 §7.26(a)/Q36 再拓宽——补排除
+  `.gitfs-submodule` 合成项，子模块目录合法触发 `.gitmodules`
+  解压属同款误报源）；
   (b) **Q28b 例外谓词过窄与 ENAMETOOLONG 边界（主要）**：谓词
   "超 PATH_MAX 且无 NUL"未覆盖"NUL 位于 PATH_MAX 之后"形态（如
   5000 字节、首 NUL 在 4500：截断长度 4500 ≥ PATH_MAX → readlink
@@ -1774,3 +1784,35 @@ gitfs/
   合并提交补记于本次提交之前，本条起恢复每轮一提交。man 页头
   注释随本条实际改动（File metadata/Symbolic links 两处）由
   Q1-Q30 升至 Q1-Q35。
+
+### 7.26 复核钉缝七轮（2026-09-24，定稿后 review round 16 跟进）
+
+- **Q36 一处断言限定语补全、man 一词与一处折行（已决）**：round 16
+  复核确认 Q35 四处钉缝与提交补记全部落地（例外谓词四处同步、
+  fixture 两形态断言、多分量子 ref 与撞名措辞钉住、§7.9(b)/
+  §7.17(c)/§7.18(a)(b) 注记、状态行与 man 头注释 Q1-Q35、提交
+  按记账拆分），另发现一处与 Q35a 同款的断言误报源与两处微瑕，
+  均无结构调整、按惯例一笔钉住：
+  (a) **getattr 零解压断言仍漏 `.gitfs-submodule` 误报源（主要）**：
+  §3.2 钉子模块说明文件的内容 `url=` 取自 commit 树根
+  `.gitmodules` blob、`st_size` 按内容字节数计，§3.5 明示缓存
+  装载的解压同样记一条 verbose 日志（§4 的 getattr 零解压断言据
+  此观测）——新挂载下 `ls -l` 遍历含 `.gitfs-submodule` 合成项
+  的目录时，其 lstat 须读 `.gitmodules`（缓存 miss 装载解压）
+  才能定内容与尺寸，断言照 Q35a 后的限定语仍会误报——fixture
+  本身含子模块、该形态可达。钉住：断言限定语拓宽为"不含 symlink
+  与 `.gitfs-submodule` 合成项（子模块条目）的目录"；§7.9(b)
+  勘误链注记；§7.25(a) 注记同步；man 页无须动（子模块例外属测
+  试断言的范围口径、非文件系统语义，File metadata/Submodules
+  两节原文不受影响）；
+  (b) **man File metadata "full" 一词误导（微）**："reports st_size
+  as its full (truncation-semantics) length" 的 "full" 对首 NUL
+  位于 PATH_MAX 之后的形态误导——该形态 st_size 报截断长度
+  （4500）而非全长（5000），Symbolic links 节的 "the truncated
+  length" 已无歧义。钉住：去 "full"、措辞与该节既有术语对齐
+  （"as its truncation-semantics length"，与其前句 "whose
+  truncation-semantics length" 同名同义）；man 页头注释随本条
+  实际改动由 Q1-Q35 升至 Q1-Q36；
+  (c) **§3.1 Q35c 插入遗留一行超宽折行（微，纯排版）**：Q35c 半句
+  插入后该段一行折行明显超宽（约 75 显示列 vs 全文约 66 列折行
+  惯例），重新折行归位、语义不变。
