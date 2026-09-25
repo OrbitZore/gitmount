@@ -2,7 +2,7 @@
 
 - RFC 编号: 0000
 - 标题: gitfs — read-only git-to-FUSE 文件系统
-- 状态： Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6、§7.7、§7.8、§7.9、§7.10、§7.11、§7.12、§7.13、§7.14、§7.15、§7.16（§7.11–§7.15 为定稿后 mount(8) 助手协议核验勘误，§7.16 为定稿后收尾勘误））
+- 状态： Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6、§7.7、§7.8、§7.9、§7.10、§7.11、§7.12、§7.13、§7.14、§7.15、§7.16、§7.17、§7.18、§7.19、§7.20、§7.21、§7.22、§7.23、§7.24（§7.11–§7.15 为定稿后 mount(8) 助手协议核验勘误，§7.16 为定稿后收尾勘误，§7.17 为定稿后边缘口径钉住，§7.18 为定稿后病理形态钉住，§7.19 为定稿后收尾口径补钉，§7.20 为定稿后复核钉缝，§7.21 为定稿后复核钉缝二轮，§7.22 为定稿后复核钉缝三轮，§7.23 为定稿后复核钉缝四轮，§7.24 为定稿后复核钉缝五轮））
 - 日期: 2026-09-24
 - 目标版本: 0.1.0
 
@@ -87,10 +87,26 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
                            refs/remotes/<remote>/HEAD 符号引用**隐藏**
                            （枚举与查找均跳过，访问 → ENOENT）：peel 后
                            仅是默认分支树的重复，符号语义也无法在目录树中
-                           表达；命名空间存在性以 refdb 为准——仅含该
+                           表达；非符号形态（`git update-ref` 直写 oid）
+                           不属隐藏规则、按普通跟踪 ref 处理——peel 至
+                           commit 呈现，非 commit 目标同本节统一口径
+                           ENOENT（Q27b）；命名空间存在性以 refdb 为准——仅含该
                            隐藏 HEAD 的命名空间仍渲染为**空目录**、
                            不抑制（Q26c），跟踪 ref 出现后由实时枚举
-                           自动填充
+                           自动填充；**裸命名空间 ref（Q29b）**——
+                           update-ref 直写 refs/remotes/<x> 本体（其下
+                           无任何子层 ref）——按命名空间目录处理、本体
+                           不呈现：/remote/<x> 渲染为空合成命名空间目
+                           录，该 ref 本体的 commit 快照经 /remote 隐式
+                           不可达（remote 入口恒按 <remote>/<分支> 两层
+                           切分的附带后果，与隐藏 HEAD 的刻意不可达
+                           不同类——声明性行为而非缺陷；该隐式不可达
+                           仅对其下无任何子层 ref 的裸形态成立——子层
+                           ref 一旦经手改 packed-refs 与之并存，即转入
+                           Q28a 合并节点口径：/remote/<x> 枚举为并集、
+                           本体经查找恢复可达，Q30a）；commits 清单
+                           仍纳入该 ref（入集枚举 refs/ 全量、peel 口径
+                           照常，与呈现口径无涉，见 3.5）
 /HEAD                    → 当前 HEAD commit 的 root tree（unborn → ENOENT）
 /commit/<full-oid>       → 该 commit 的 root tree；oid 长度随仓库对象格式
                            （sha1=40、sha256=64），仅接受**小写**十六进制——
@@ -144,7 +160,22 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   `origin/feature/x`）按嵌套目录渲染**：
   readdir 按首分量分组；查找时逐级累积分量查询 refdb。git refdb 的 D/F
   规则保证一个 ref 不会是另一个的前缀，因此至多存在一个完整 ref 名前缀
-  匹配，剩余分量即 tree 路径，无歧义；分组前缀节点与完整 ref 节点均为
+  匹配，剩余分量即 tree 路径，无歧义——该保证只在 update-ref/refdb
+  正常写入路径成立，手工编辑 packed-refs 可破坏之（同时含
+  `refs/tags/foo` 与 `refs/tags/foo/bar`），解析回退钉住（Q27c）：
+  查找取**最长 ref 名匹配**（`/tag/foo/bar` 解析为 ref
+  `refs/tags/foo/bar` 的 root tree，而非 ref `refs/tags/foo` root
+  tree 下行 entry `bar`；branch/remote 同构），readdir 分组目录下同名
+  的 tree entry 与子 ref 折叠为一项、按子 ref 渲染，命中歧义记警告
+  日志（病态仓库防御，与 tree entry `.`/`..` 的手工构造防御同向，
+  正常 refdb 路径不触发）；**合并节点自身的 readdir 同钉（Q28a）**：
+  `/tag/foo` 这类"既是完整 ref 又含子 ref"的合并节点，自身枚举定为
+  ref `foo` root tree 条目 ∪ 子 ref 名的**并集**，同名（tree 恰含
+  entry `bar` 且子 ref 亦名 `bar`）按子 ref 折叠为目录——与父目录
+  折叠口径一致；若 ref `foo` 为非 commit 目标，该节点按本节统一
+  口径 lookup → `ENOENT`，与父目录 readdir 仍渲染折叠目录项形成
+  形状失配——**以查找口径为准**（目录项仅为枚举线索、不构成可访问
+  性承诺），失配同样记警告日志；分组前缀节点与完整 ref 节点均为
   目录，getattr 语义一致——完整 ref 节点即其 root tree（元数据按
   tree 目录口径，mtime = 所属 commit 的 committer time，见 3.2）；
   **分组前缀节点**（`/branch/feature`、`/tag/v1.0`、`/remote/origin`
@@ -152,8 +183,10 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   `st_mtime/ctime/atime` = 挂载时刻——与五个入口目录同口径（见
   3.2/Q16d），非 tree 目录、不取 committer time（Q26b）。
 - **readdir 顺序全域钉住（Q16c）**：根目录、`branch/tag/remote`（含嵌套
-  ref 的分组前缀目录）与 tree 目录一律按**路径分量原始字节（memcmp，无
-  locale 参与）字典序**输出。tree 目录**重排**为字节字典序而非沿用
+  ref 的分组前缀目录）、tree 目录与 Q28a 合并节点的 readdir 并集一律按
+  **路径分量原始字节（memcmp，无 locale 参与）字典序**输出；并集输出
+  同按分量原始字节字典序——子 ref 名这类非 tree 条目与 tree 条目混入
+  同一排序、不按来源分组（Q29a）。tree 目录**重排**为字节字典序而非沿用
   git tree 的内在条目序——后者按"目录名附加 `/` 后参与比较"的规则，
   在 `foo`（目录）与 `foo.txt`（文件）这类组合上与纯字节序相反
   （`0x2E '.'` < `0x2F '/'`，git 序把 `foo.txt` 排在 `foo/` 之前）——
@@ -187,8 +220,23 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 | `120000` | `S_IFLNK \| 0777` | 符号链接，`readlink` 返回 blob 内容 |
 | `160000` | `S_IFDIR \| 0755`（空目录）+ 说明文件 | 子模块：渲染为空目录，旁边放 `<name>.gitfs-submodule` 文本文件（`<name>` 即该子模块目录名，如 `deps/libfoo` → `deps/libfoo.gitfs-submodule`；内容含 url 与 commit oid）；若树中已存在与该合成文件名相同的真实条目，真实条目优先、省略合成文件（记警告日志） |
 
-- `st_size`：blob 的原始字节数（libgit2 直读，不做过滤）。**尺寸获取
-  路径钉住（Q19b）**：blob 尺寸一律经 **header-only 读取**
+- `st_size`：blob 的原始字节数（libgit2 直读，不做过滤）；**符号链接
+  例外（Q27a）：st_size 取截断至首个 NUL 后的长度**，与 3.3 readlink
+  口径对齐——stat 报告的尺寸恒等于 readlink 返回的字节数，含嵌入 NUL
+  的 symlink 不得报原始 blob 尺寸（取该值须读 blob 内容定位首个 NUL，
+  为下述 header-only 路径的显式例外：symlink blob 上限 PATH_MAX、内容
+  本就须为 readlink 读取，代价可忽略——该上限只对 git 正常写入
+  成立）。**不变式的显式例外（Q28b）**：超 PATH_MAX 且无 NUL 的
+  手工 symlink blob（hash-object 手工构造，git 正常写入不产生）——
+  st_size 仍按截断口径报全长（无 NUL 即原始字节数），readlink 则报
+  `ENAMETOOLONG`（见 3.3），"stat 报告的尺寸恒等于 readlink 返回的
+  字节数"的不变式在此病理形态显式失效，以 readlink 报错为声明
+  例外（st_size 不回退为 0 或其他值）；取该全长同须读 blob 定位
+  首个 NUL——无 NUL 即 getattr 须全量扫描 blob 方可定全长，Q27a
+  "PATH_MAX 上限、代价可忽略"的代价论证只锚定 git 正常写入、对
+  此手工形态失效（man 页 File metadata 已含此让步，此处镜像
+  对齐，Q30c）。**尺寸获取
+  路径钉住（Q19b）**：普通 blob 的尺寸一律经 **header-only 读取**
   （`git_odb_read_header`）获得，不触发 blob 全量解压——`getattr` 与
   3.5 的超限准入判定同用此路径，含多 GB blob 目录的 `ls -l`（getattr）
   或 open 阶段的超限判定都不为取 size 付整块解压的代价，与 3.3 已
@@ -247,7 +295,8 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   `/remote/origin` 等，见 3.1）同口径钉为 `S_IFDIR|0755`、`nlink=2`、
   `st_mtime/ctime/atime` = 挂载时刻——非 tree 目录、不取 committer
   time（Q26b）；**目录 `st_size` 恒为 4096**（根、入口、分组与 tree
-  目录统一，Q26d——与 `st_blksize` 同量级的目录尺寸惯例值，根 `/`
+  目录统一，合并节点经完整 ref 节点同归 tree 目录口径，Q26d/Q31b——
+  与 `st_blksize` 同量级的目录尺寸惯例值，根 `/`
   不再留未定口径）。
 - `.gitfs-submodule` 说明文件：mode `0644`，内容为两行 `key=value` 文本——
   `url=<submodule url>` 与 `commit=<完整 oid>`（各以 LF 结尾）；url 取自该
@@ -259,10 +308,10 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 | 操作 | 行为 |
 |---|---|
 | `getattr` | 路径 → 对象（3.1），失败 `ENOENT`；`commits` 恒为纯缓存读（未生成时 `st_size=0`），**不**触发 revwalk 或指纹重算（见 3.5）；blob 的 `st_size` 经 header-only 读取（`git_odb_read_header`）获得，**不**触发 blob 全量解压（见 3.2/Q19b，与"不触发 revwalk"同构） |
-| `readdir` | 根：固定列表；`branch/tag/remote`：枚举 ref（含 `/` 的名字按目录分组）；`commit`：**恒为空**；tree：枚举 entries（含 `.gitfs-submodule` 合成项）——全部目录（含根）的输出顺序一律按分量原始字节字典序（见 3.1）。注册 `opendir/releasedir`：枚举列表快照挂于 `fi->fh`，保证单目录流内 offset 续读稳定（fuse3 要求），跨目录流实时反映 ref 变化 |
+| `readdir` | 根：固定列表；`branch/tag/remote`：枚举 ref（含 `/` 的名字按目录分组）；`commit`：**恒为空**；tree：枚举 entries（含 `.gitfs-submodule` 合成项）；合并节点：root tree 条目 ∪ 子 ref 名的并集、同名按子 ref 折叠（见 3.1/Q28a）——全部目录（含根，并集含其中）的输出顺序一律按分量原始字节字典序、子 ref 名与 tree 条目混排不分组（见 3.1/Q29a）。注册 `opendir/releasedir`：枚举列表快照挂于 `fi->fh`，保证单目录流内 offset 续读稳定（fuse3 要求），跨目录流实时反映 ref 变化 |
 | `open`/`release` | 仅校验 `O_RDONLY` 系标志（写标志 → `EROFS`，与内核对 ro 挂载的判定一致）；`commits` 首次 `open` 触发生成（见 3.5），且把当前缓冲版本**钉住于 `fi->fh`**——同一次 open 的所有 read 分片读自同一快照，refs 中途变化不影响（与 readdir 的目录流快照同构），`release` 时解除钉住；超限 blob（≥ `--blob-cache-size`，边界钉住见 3.5/Q26d）的 `open` 同构 open-pin：一次性 lookup（单互斥内）+ 全量解压（锁外执行，不阻塞全挂载其他请求），解压块钉住于 `fi->fh`、`release` 释放（见 3.5/Q18a）；`.gitfs.json` 挂载期内不可变，无需钉住 |
 | `read` | 定位 blob（可缓存者经 LRU 缓存；超限者读 open 时钉住的解压块，见 3.5），拷贝 `[offset, offset+size)` 越界截断；合成文件（`commits`、`.gitfs.json`、`.gitfs-submodule`）为整块只读缓冲，`commits` 读 open 时钉住的版本 |
-| `readlink` | symlink blob 内容；内容含嵌入 NUL 时**截断至首个 NUL**（内核 symlink 目标不可含 NUL；与 `git checkout` 的事实行为一致，显式同语义而非 `EIO`）；空 blob → 返回长度 0 的空目标；超过 PATH_MAX → `ENAMETOOLONG` |
+| `readlink` | symlink blob 内容；内容含嵌入 NUL 时**截断至首个 NUL**（内核 symlink 目标不可含 NUL；与 `git checkout` 的事实行为一致，显式同语义而非 `EIO`）；截断口径与 `st_size` 对齐——symlink 的 stat 尺寸即截断后长度（见 3.2/Q27a）；空 blob → 返回长度 0 的空目标；超过 PATH_MAX → `ENAMETOOLONG`（此病理形态下 st_size 仍按截断口径报全长——“stat 尺寸 = readlink 返回字节数”不变式的显式例外，见 3.2/Q28b） |
 | `statfs` | 汇报本地 ODB 占用为 `f_blocks`（全部 packfile 字节 + loose 对象字节；alternates 指向的外部存储不计入，启用 alternates 时 verbose 日志提示），块大小 4KiB；`f_bfree = f_bavail = 0`——只读卷惯例是 0 空闲，`df` 显示 100% 已用，向用户明确传达"无任何可写空间"（若报全量可用，`df` 会显示 0% 已用，易误导）；`f_files = f_ffree = 0`（精确 inode 计数需全量遍历，v0.1 不承诺，内核与 `df` 均容忍 0） |
 | 其余（`mknod/mkdir/write/…`） | 返回 `EROFS` 或不注册（fuse3 只读挂载兜底）；**xattr 族**（`getxattr/setxattr/listxattr/removexattr`）一律不注册 → libfuse 缺省 `ENOSYS`，内核标记“无 xattr”后统一向用户态报 `ENOTSUP`（SELinux 等环境的 `security.*`/statx 附加字段查询命中此路径，干净短路而非逐次回环） |
 
@@ -750,7 +799,10 @@ gitfs/
 │   ├── unit/                 # Catch2 v3（FetchContent）；path_map、cache、errmap
 │   ├── integration/          # 真实挂载：fixture 仓库 + 断言 readdir/read/readlink
 │   └── fixtures/make_repo.sh # 生成含子模块、symlink（含嵌入 NUL 的
-│                              # symlink blob）、中文文件名、非 UTF-8 文件名
+│                              # symlink blob，及超 PATH_MAX 无 NUL 的
+│                              # 手工 symlink blob——readlink 报
+│                              # ENAMETOOLONG 而 st_size 报全长，Q28b）、
+│                              # 中文文件名、非 UTF-8 文件名
 │                              # （原始字节透传）、嵌套分支名（feature/x）、
 │                              # annotated 与 blob tag、可执行文件的测试仓库；
 │                              # 并用 mktree/hash-object -w 手工构造含 '.'
@@ -758,6 +810,30 @@ gitfs/
 │                              # 供 readdir 跳过断言使用；另含 detached
 │                              # HEAD 独有 commit（供 /commits 清单断言）
 │                              # 与 refs/remotes/origin/HEAD（供隐藏断言）、
+│                              # update-ref 直写的非符号 refs/remotes/
+│                              # upstream/HEAD（供按普通跟踪 ref 呈现断
+│                              # 言，见 3.1/Q27b）、update-ref 直写的
+│                              # 裸命名空间 ref refs/remotes/legacy（供
+│                              # 空命名空间目录与 commits 清单纳入断言，
+│                              # 见 3.1/Q29b）、手改 packed-refs 同时
+│                              # 含 refs/tags/foo、refs/tags/foo/ab
+│                              # 与 refs/tags/foo/bar（供最长 ref 名
+│                              # 匹配回退断言，Q27c；ref foo 的
+│                              # tree 构造为恰含 blob entry bar、
+│                              # 排序先于 bar 的 blob entry aa 与
+│                              # blob entry zz（aa/zz 均不与任何
+│                              # 子层 ref 同名），子层 ref foo/ab
+│                              # 不与任何 tree 条目同名——两类来源
+│                              # 在排序上互不嵌套，供合并节点
+│                              # readdir 并集（两类来源均在列）、
+│                              # 混排顺序（[aa,ab,bar,zz] 与任一
+│                              # 分组序可分辨）与 bar 同名折叠为
+│                              # 目录（原 blob、折叠后类型可分辨）
+│                              # 断言，Q28a/Q29a/Q33/Q34；
+│                              # 另手改 packed-refs 同时含 update-ref
+│                              # 指向 blob 的 refs/tags/baz 与子层
+│                              # refs/tags/baz/qux，构成非 commit 目标
+│                              # 合并节点——供形状失配断言，Q28a/Q32）、
 │                              # refs/replace/<oid>（供 replace 不生效断
 │                              # 言）、refs/notes/keep 与 refs/stash
 │                              # （供 commits 入集口径断言，对齐
@@ -790,17 +866,41 @@ gitfs/
     的反例断言）；含"挂载后新增 tag 立即可见"的一致性用例；
     边缘用例：`'.'`/`'..'` entry 在 readdir/getattr 被跳过且记警告、
     `refs/remotes/origin/HEAD` 在 `/remote` 不可见（访问 → `ENOENT`）、
+    update-ref 直写的非符号 `refs/remotes/upstream/HEAD` 按普通跟踪
+    ref 可见（不隐藏，见 3.1/Q27b）、update-ref 直写的裸命名空间 ref
+    （`refs/remotes/legacy`，其下无子层）下 `/remote/legacy` 渲染为空
+    合成命名空间目录、ref 本体经 `/remote` 不可达而其 commit 入
+    `commits` 清单（见 3.1/Q29b）、手改 packed-refs 破坏 D/F 规则
+    （同含 `refs/tags/foo` 与 `refs/tags/foo/bar`）时 `/tag/foo/bar`
+    解析为后者 ref、警告日志命中（最长 ref 名匹配，见 3.1/Q27c）、
+    合并节点 `/tag/foo` 自身 readdir 为 tree 条目 ∪ 子 ref 名并集
+    （fixture：ref foo 的 tree 含 blob entry `bar`、`aa` 与 `zz`，
+    子层另含不与任何 tree 条目同名的 ref `foo/ab`——两类来源
+    均在列、只列子 ref 名即缺 `aa`/`zz`、只列 tree 条目即缺
+    `ab`，`bar` 同名折叠为目录而原形态为 blob、类型可分辨，
+    Q33/Q34）、ref `baz`（update-ref 指向 blob）与子层
+    `refs/tags/baz/qux` 并存时 `/tag/baz` 该节点 `ENOENT` 而父目录
+    折叠目录项仍在（以查找口径为准，见 3.1/Q28a/Q32）、折叠歧义
+    （`/tag/foo` 并集内 `bar` 同名折叠）与形状失配（`/tag/baz`
+    `ENOENT`）的警告日志各自命中（见 3.1/Q27c/Q28a、Q33）、
     嵌套 ref 分组/命名空间目录（`/branch/feature`、`/remote/origin`）
     的元数据断言：mode 0755、nlink=2、mtime/ctime/atime = 挂载时刻
-    （与入口目录同口径、非 committer time），及根、分组与 tree 目录
-    `st_size`=4096（Q26b/Q26d）、
+    （与入口目录同口径、非 committer time），及根、分组、合并节点与
+    tree 目录 `st_size`=4096（Q26b/Q26d/Q31b）、
     非 UTF-8 文件名按原始字节读回、含嵌入 NUL 的 symlink 截断至首个
-    NUL、detached HEAD 独有 commit 出现在 `commits` 清单中、存在
+    NUL 且 stat 的 `st_size` 与 readlink 返回长度一致（截断后口径，
+    见 3.2/Q27a）、超 PATH_MAX 无 NUL 的手工 symlink blob：readlink
+    报 `ENAMETOOLONG` 而 stat `st_size` 报全长（不变式显式例外，
+    Q28b）、detached HEAD 独有 commit 出现在 `commits` 清单中、存在
     blob tag 时 `commits` 仍可成功生成且含全部 commit oid（非
     commit ref 跳过不计错，见 3.5）、`commits` 清单排序归一后与
     `git --no-replace-objects rev-list --all` 输出一致（notes/stash
     ref 的 commit 在列）、readdir 顺序断言（根与 branch/tag/remote/
-    tree 按分量原始字节字典序，含嵌套 ref 分组前缀与
+    tree 按分量原始字节字典序，含嵌套 ref 分组前缀、合并节点并集
+    （tree 条目与子 ref 名混排同序，Q29a；fixture 并集为
+    `aa`/`ab`/`bar`/`zz`、两类来源排序互不嵌套——混排序
+    [aa,ab,bar,zz] 与任一分组序 [ab,bar,aa,zz]/[aa,bar,zz,ab]
+    可分辨，Q34）与
     `.gitfs-submodule` 合成项；oracle 以 `LC_ALL=C sort` 归一比对）、
     非 commit 目标入口：ref 指向 blob 的分支（update-ref 手工构造）
     → `/branch/<name>` `ENOENT`（与 `/tag` 同口径，见 3.1/Q17b）、
@@ -1362,10 +1462,229 @@ gitfs/
   下实际存在的首层命名空间"的 refdb 直读语义一致，跟踪 ref 出现
   后由实时枚举自动填充；§3.1 与 man 页 remote/ 条目各一句；
   (d) **两处边界（微）**：① 目录 `st_size` 原无口径（含根 `/`）——
-  钉为 4096（全部目录统一：根、入口、分组与 tree 目录，与
-  `st_blksize` 同量级的惯例值）；② 超限判定原为严格 `>`——恰等于
+  钉为 4096（全部目录统一：根、入口、分组与 tree 目录，合并节点经
+  完整 ref 节点同归 tree 目录口径——经 §7.21(b)/Q31 在 §3.2 行内
+  点名，与 `st_blksize` 同量级的惯例值）；② 超限判定原为严格 `>`——恰等于
   `--blob-cache-size` 的 blob 会尝试入池、为容纳它逐出整池其余条目
   而自身又几乎占满全池（等效清空整池），与"为单个超限对象清空整池
   引起缓存抖动"的绕过动机矛盾——边界钉为 `>=`（恰等于上限的 blob
   同走绕过路径）；§3.2/§3.3/§3.5 钉住、§4 超限用例补边界断言、
   man 页 File metadata/--blob-cache-size 同步。
+
+### 7.17 边缘口径钉住（2026-09-24，定稿后 review round 7 跟进）
+
+- **Q27 symlink st_size 与 NUL 截断对齐、非符号远端 HEAD、packed-refs
+  破坏 D/F 的解析回退与 man 页 -t 条目（已决）**：round 7 复核发现
+  四处一句级钉住缺口，均无结构调整：
+  (a) **symlink st_size 与 NUL 截断对齐（主要）**：§3.2 原钉
+  st_size = blob 原始字节数、§3.3 readlink 截至首个 NUL——含嵌入
+  NUL 的 symlink 会出现 stat 报 6 字节而 readlink 返回 1 字节的
+  失配。钉住：symlink 的 st_size = **截断后长度**，stat 报告的
+  尺寸恒等于 readlink 返回的字节数（含嵌入 NUL 时不得报原始 blob
+  尺寸）；取值须读 blob 内容定位首个 NUL，为 Q19b header-only
+  路径的显式例外（symlink blob 上限 PATH_MAX、内容本就须为
+  readlink 读取，代价可忽略，"getattr 不为大 blob 触发全量解压"
+  的钉住目标不受影响——该代价论证锚定的 PATH_MAX 上限只对 git
+  正常写入成立、对 Q28b 手工形态失效的让步经 §7.20(c)/Q30 在
+  §3.2 显式钉住）；§3.2/§3.3 钉住、§4 增 stat/readlink 长度
+  一致断言、man 页 File metadata 与 Symbolic links 同步；
+  (b) **非符号形态的 refs/remotes/<remote>/HEAD（小）**：§3.1 隐藏
+  规则只覆盖符号引用，`git update-ref` 直写 oid 的非符号形态原无
+  口径。钉住：**按普通跟踪 ref 处理**——不隐藏，peel 至 commit
+  呈现，非 commit 目标同 §3.1 统一口径 ENOENT；§3.1 与 man 页
+  remote/ 条目各一句、§4 fixture 增直写形态（refs/remotes/
+  upstream/HEAD）的可见断言；
+  (c) **手工 packed-refs 破坏 D/F 规则的解析回退（小）**：D/F 保证
+  （"至多一个前缀匹配"）只在 update-ref/refdb 正常写入路径成立，
+  手工编辑 packed-refs 可同时含 `refs/tags/foo` 与
+  `refs/tags/foo/bar`——失效后解析歧义原无回退口径（文档对 tree
+  entry 防御手工构造却不防 refs）。钉住：查找取**最长 ref 名匹配**
+  （`/tag/foo/bar` 解析为 ref `refs/tags/foo/bar` 而非 ref `foo`
+  的 tree 下行 entry `bar`，branch/remote 同构），readdir 分组目录
+  下同名的 tree entry 与子 ref 折叠为一项、按子 ref 渲染，命中
+  歧义记警告日志（病态仓库防御，正常 refdb 路径不触发）；§3.1
+  嵌套 ref 条目与 man 页 branch/ 条目同步、§4 增回退断言（折叠
+  歧义警告的断言经 §7.23(b)/Q33 补齐）；
+  (d) **man 页 OPTIONS 补 -t 一行条目（微）**：INVOCATION 已覆盖
+  -t 契约处理，OPTIONS 节原缺该短选项条目——补齐与 §3.7 帮助
+  文本的自包含对称性（-t gitfs 接受记 verbose 一条、其余值含
+  `gitfs.<x>` 带点形态为 usage error）。
+
+### 7.18 病理形态钉住（2026-09-24，定稿后 review round 8 跟进）
+
+- **Q28 合并节点 readdir 与超限 symlink blob 的不变式例外（已决）**：
+  round 8 复核确认 Q27 四处缺口全部闭合，另发现两处病理角落的
+  一句级钉住缺口，均无结构调整：
+  (a) **合并节点自身的 readdir（小）**：Q27c 钉住了最长 ref 名匹配
+  的查找回退与父目录的折叠渲染，但"既是完整 ref 又是命名空间
+  前缀"的合并节点（`refs/tags/foo` 与 `refs/tags/foo/bar` 并存
+  时的 `/tag/foo`）自身枚举未钉。钉住：readdir 定为该 ref root
+  tree 条目 ∪ 子 ref 名的并集，同名（tree 恰含 entry `bar`）
+  按子 ref 折叠为目录；ref `foo` 为非 commit 目标时该节点
+  getattr → ENOENT 与父目录 readdir 折叠目录项的形状失配
+  **以查找口径为准**（目录项仅为枚举线索，不构成可访问性承诺，
+  失配记警告日志——该警告的 §4 断言经 §7.23(b)/Q33 补齐）；§3.1
+  钉住、§4 fixture（ref foo 的 tree 构造为恰含 entry `bar`——该
+  退化并集形态经 §7.23(a)/Q33 增 `zz` 并钉 `bar` 为 blob 后可
+  分辨；非 commit 目标合并节点的第二病理状态——指向
+  blob 的 refs/tags/baz 与子层 refs/tags/baz/qux 并存——经
+  §7.22(a)/Q32 在 §4 fixture 补齐）与断言同步、man 页 branch/ 条目同步；
+  (b) **超 PATH_MAX 无 NUL 的手工 symlink blob（微）**：Q27a 的
+  "stat 报告的尺寸恒等于 readlink 返回的字节数"不变式在该形态
+  下被 §3.3 的 `ENAMETOOLONG` 证伪，且"symlink blob 上限
+  PATH_MAX"的代价论证只对 git 正常写入成立（手工
+  hash-object 构造无此约束）。钉住：该病理形态 readlink 报
+  `ENAMETOOLONG`、st_size 仍按截断口径报全长（无 NUL 即原始
+  字节数），为该不变式的**显式例外**；§3.2/§3.3 钉住、§4
+  fixture 增超限 blob 断言、man 页 File metadata 与 Symbolic
+  links 同步。
+
+### 7.19 收尾口径补钉（2026-09-24，定稿后 review round 9 跟进）
+
+- **Q29 合并节点并集输出顺序与裸命名空间 ref 不可达声明（已决）**：
+  round 9 复核确认 Q28 两处缺口闭合且贯通到位（Q1–Q27 勘误链亦
+  无回退），另发现两处一句级微缺口，均无结构调整、按惯例一笔
+  钉住：
+  (a) **合并节点 readdir 并集的输出顺序（微）**：Q28a 钉住了并集
+  构成（tree 条目 ∪ 子 ref 名、同名折叠、形状失配以查找口径为
+  准），但其输出顺序未显式纳入 §3.1 readdir 顺序全域钉住句
+  （Q16c）的枚举名单——该句原只列根/branch/tag/remote（含分组
+  前缀目录）/tree 目录，而并集含子 ref 名这类非 tree 条目，顺序
+  原只能推定。钉住：合并节点并集输出同按路径分量原始字节字典
+  序，子 ref 名与 tree 条目混入同一排序、不按来源分组——该断言
+  在 fixture 上的可分辨性经 §7.24(a)/Q34 增 `aa`/`foo/ab`（两类
+  来源排序互不嵌套）后成立（§7.23(a)/Q33 增 `zz` 只闭合并集
+  构成与折叠类型两形态）；§3.1
+  Q16c 句、§4 readdir 顺序断言与 man 页 Names 节同步；
+  (b) **裸命名空间 ref 的不可达声明（微）**：update-ref 直写
+  `refs/remotes/<x>` 本体（无子层 ref）时，`/remote/<x>` 按现有
+  规则可推定为空合成命名空间目录，但该 ref 本体的 commit 快照
+  经 `/remote` 隐式不可达且未声明——与隐藏 HEAD 的刻意不可达
+  不同类，系 remote 入口恒按 `<remote>/<分支>` 两层切分的附带
+  后果（"恒按两层切分"的无条件措辞经 §7.20(a)/Q30 限定：仅对其
+  下无子层 ref 的裸形态成立，有子层 ref 经手改 packed-refs 并存
+  时并入 Q28a 合并节点口径、本体恢复可达）。钉住：**裸命名空间
+  ref 按命名空间目录处理、本体不呈现**
+  （隐式不可达为声明性行为而非缺陷；commits 清单仍纳入——入集
+  枚举 `refs/` 全量、peel 口径照常，与呈现口径无涉，见 3.5）；
+  §3.1 `/remote` 条目与 man 页 remote/ 条目同步、§4 fixture
+  （refs/remotes/legacy）与断言增补。
+
+### 7.20 复核钉缝（2026-09-24，定稿后 review round 10 跟进）
+
+- **Q30 三处一句级残留缺口（已决）**：round 10 复核确认 Q27–Q29
+  钉住质量（交叉引用可解析、fixture 与 man 页同步到位、round
+  编号连贯），另发现三处一句级缝隙，均无结构调整、按惯例一笔
+  钉住：
+  (a) **Q29b 不可达声明与 Q28a 合并节点口径的交互（主要）**：
+  Q29b 将"remote 入口恒按 <remote>/<分支> 两层切分"的论证写成
+  无条件句，但其下有子层 ref 并存的 refs/remotes/<x> 完整 ref
+  实际落入 Q28a 合并节点口径——本体经查找恢复可达，两句未显式
+  调和，易误读为 /remote 下完整 ref 永不呈现。钉住：§3.1 Q29b
+  段补一子句——该隐式不可达仅对其下无任何子层 ref 的裸形态
+  成立，子层 ref 一旦经手改 packed-refs 与之并存即转入 Q28a
+  合并节点口径（/remote/<x> 枚举为并集、本体恢复可达）；man
+  页 remote/ 条目同步补一句、头注释随勘误同步升至 Q1-Q30（该同步
+  经 §7.21(a)/Q31 补齐）、§7.19(b) 勘误链注记；remote 侧
+  合并形态系 tag 侧 Q28a fixture 已覆盖机制（branch/remote
+  同构）的推论，§4 无须新增用例；
+  (b) **§3.3 readdir 表格行自包含性（小）**：表格行仍只枚举根/
+  branch/tag/remote/commit/tree，合并节点并集的构成（tree 条目
+  ∪ 子 ref 名、同名折叠）与顺序（混排同序）只存在于 §3.1 正文
+  （man 页 Names 节已含）。钉住：行内点名合并节点并集并加
+  Q28a/Q29a 交叉引用，表格恢复自包含；
+  (c) **Q27a 代价论证对 Q28b 形态的显式让步（微）**：Q27a 的
+  "PATH_MAX 上限、代价可忽略"论证对 Q28b 病理形态失效——该形态
+  取截断 st_size 须 getattr 全量扫描 blob，man 页 File metadata
+  已含"该上限只对 git 正常写入成立"的让步说明。钉住：§3.2 Q28b
+  句镜像补半句（取全长须 getattr 全量扫描、代价论证只锚定
+  正常写入）、§7.17(a) 勘误链注记。
+
+### 7.21 复核钉缝二轮（2026-09-24，定稿后 review round 11 跟进）
+
+- **Q31 两处一句级残留缺口（已决）**：round 11 复核确认 Q30 三处
+  钉缝全部闭合且贯通到位（交叉引用可解析、fixture 与 man 页同步
+  到位、round 编号连贯），另发现两处微缝，均无结构调整、按惯例
+  一笔钉住：
+  (a) **man 页头注释随勘误同步（微，明确）**：头注释第 1 行仍为
+  Q1-Q29，但 Q30 按 §7.20(a) 已实际改动 man 页（remote/ 条目补
+  句）——既有惯例（§7.12/§7.13 头注释随勘误同步，本次勘误链自身
+  亦由 Q1-Q26 升至 Q1-Q29）要求随改随更。钉住：头注释升为 Q1-Q30、
+  §7.20(a) 补"头注释同步"半句注记，一字之改；
+  (b) **§3.2 目录 st_size 枚举点名合并节点（微，可选）**：Q26d 的
+  "根、入口、分组与 tree 目录统一"未点名合并节点，须经理论一跳
+  （§3.1"完整 ref 节点即其 root tree（元数据按 tree 目录口径）"）
+  方可推得——man 页 File metadata 已用"All directories, the root
+  included"通称覆盖。钉住：镜像 §7.20(b) 对 readdir 表格行的处理，
+  §3.2 补半句"合并节点经完整 ref 节点同归 tree 目录口径"恢复行内
+  自包含，§4 st_size 断言行同理点名合并节点、§7.16(d) 勘误链注记。
+
+### 7.22 复核钉缝三轮（2026-09-24，定稿后 review round 12 跟进）
+
+- **Q32 形状失配断言的 fixture 覆盖缺口（已决）**：round 12 复核
+  确认 Q31 两处微缝全部闭合且贯通到位（四条勘误链注记可解析、
+  状态行与 round 编号 7–11 连贯），另发现一处断言与 fixture 覆盖
+  之间的一跳缺口，无结构调整、按惯例一笔钉住：
+  (a) **合并节点非 commit 目标的第二病理状态未入 fixture（微）**：
+  §4 断言行含"ref foo 指向 blob 时该节点 ENOENT 而父目录折叠目录项
+  仍在（以查找口径为准，见 3.1/Q28a）"的形状失配断言，但 fixture
+  枚举仅为 foo 构造了 commit 变体（"ref foo 的 tree 构造为恰含
+  entry bar"——该退化并集形态经 §7.23(a)/Q33 增 `zz` 补强），
+  既有的"update-ref 指向 blob 的分支 ref"（Q17b
+  用）无子层 ref、覆盖不到合并节点失配形态——断言与 fixture 覆盖
+  间存在一跳缺口。钉住：make_repo.sh 描述补一句——手改 packed-refs
+  同时含指向 blob 的 refs/tags/baz 与子层 refs/tags/baz/qux，构成
+  非 commit 目标合并节点；§4 形状失配断言行改点名该 fixture
+  （`/tag/baz` 该节点 ENOENT 而 `/tag` readdir 折叠目录项 baz 仍
+  在）、§7.18(a) 勘误链注记；语义无新增（§3.1 Q28a 句已钉住非
+  commit 目标合并节点口径，foo/baz 仅换名实证），man 页无须动。
+
+### 7.23 复核钉缝四轮（2026-09-24，定稿后 review round 13 跟进）
+
+- **Q33 退化并集 fixture 与两类警告的断言缺口（已决）**：round 13
+  复核确认 Q32 缺口闭合且贯通到位（五条勘误链注记可解析、状态行
+  与 round 编号 7–12 连贯），另发现两处一句级微缝，均无结构调整、
+  语义无新增（man 页不动），按惯例一笔钉住：
+  (a) **唯一可 readdir 的合并节点 fixture 为退化并集（微，明确）**：
+  fixture 中"ref foo 的 tree 构造为恰含 entry `bar`"使 tree 条目集
+  与子 ref 名集同为 {bar}，§4 的"并集构成"断言（Q28a）与"tree
+  条目与子 ref 名混排同序"断言（Q29a）在该 fixture 上不可分辨
+  ——只列子 ref 名、或按来源分组排序的错误实现同样通过（baz
+  合并节点 ENOENT 不可 readdir、legacy 无子层，均补不上）。钉住：
+  make_repo.sh 描述为 ref foo 的 tree 增一个不与任何子层 ref
+  同名的 entry（`zz`）、顺带钉 entry `bar` 为 blob——并集两类
+  来源均在列（只列子 ref 名即缺 `zz`）、`bar` 原为 blob 而折叠
+  为目录（"折叠为目录"可分辨类型）——`zz` 只闭合并集构成与折叠
+  类型两个失效形态，"按来源分组排序"形态经 §7.24(a)/Q34 增
+  `aa`/`foo/ab` 后闭合；§4 并集与顺序断言行点名该
+  fixture、§7.18(a)/§7.19(a)/§7.22(a) 勘误链注记；
+  (b) **折叠歧义与形状失配警告缺断言（微，可选）**：§3.1 钉住的
+  折叠歧义警告（Q27c 句）与形状失配警告（Q28a 句）在 §4 无对应
+  断言（仅 lookup 歧义警告被断言）。钉住：§4 顺带补半句——折叠
+  歧义（`/tag/foo` 并集内 `bar` 同名折叠）与形状失配（`/tag/baz`
+  ENOENT 而折叠目录项仍在）的警告日志各自命中、§7.17(c)/
+  §7.18(a) 勘误链注记。
+
+### 7.24 复核钉缝五轮（2026-09-24，定稿后 review round 14 跟进）
+
+- **Q34 Q29a 顺序断言的分组排序可分辨性缺口（已决）**：round 14
+  复核确认 Q33 两处缺口闭合且贯通到位（§7.17(c)/§7.18(a)/
+  §7.19(a)/§7.22(a) 四处勘误链注记可解析、状态行列全 §7.17–
+  §7.23、round 编号 7–13 连贯、man 页头注释停留 Q1-Q30 与
+  "语义无新增、man 页不动"钉住口径自洽），另发现一处一句级
+  微缝，无结构调整、语义无新增（man 页不动），按惯例一笔钉住：
+  (a) **Q29a 顺序断言对分组排序形态仍不可分辨（微，明确）**：
+  Q33 增 `zz` 后 fixture 的 ref foo tree 条目为 {bar, zz}、
+  子 ref 名为 {bar}——唯一子 ref 名 `bar` 折叠入位且排序先于
+  唯一 tree-only entry `zz`，"子 ref 优先分组""tree 优先分组"
+  "混排"三种实现输出同为 [bar, zz]，分组排序失效形态未闭——
+  而 §7.23(a) 的钉住动机恰点名"按来源分组排序的错误实现同样
+  通过"为待闭合形态、§7.19(a) 注记亦称可分辨性经 §7.23(a)/
+  Q33 成立，两处相对自身目标超额声明。钉住：make_repo.sh 描述
+  为 ref foo 的 tree 增排序先于 `bar` 的 blob entry `aa`、
+  子层增不与任何 tree 条目同名的 ref `refs/tags/foo/ab`——
+  两类来源在排序上互不嵌套，混排序 [aa, ab, bar, zz] 与任一
+  分组序 [ab, bar, aa, zz]/[aa, bar, zz, ab] 均可分辨；§4
+  并集/顺序断言行同步点名（只列 tree 条目即缺 `ab` 补闭第二
+  方向）、§7.19(a)/§7.23(a) 勘误链注记修正（`zz` 只闭合构成
+  与类型两形态）。

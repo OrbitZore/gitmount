@@ -1,4 +1,4 @@
-.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q26)
+.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q30)
 .TH MOUNT.GITFS 8 "2026-09-24" "gitfs 0.1.0" "System Administration"
 .SH NAME
 mount.gitfs \- mount a git repository as a read\-only FUSE filesystem
@@ -188,6 +188,30 @@ Branch names containing
 (e.g.\&
 .IR feature/foo )
 are rendered as nested directories.
+Resolution takes the longest ref-name match, so a path has at most one
+ref interpretation even in a pathological repository whose hand-edited
+packed-refs file breaks the ref database's D/F rule (refs/tags/foo
+coexisting with refs/tags/foo/bar):
+.I /tag/foo/bar
+resolves to the
+.I refs/tags/foo/bar
+ref rather than to entry
+.I bar
+inside the
+.I refs/tags/foo
+snapshot, a same-name tree entry and child ref
+collapse to one item rendered as the ref, and the ambiguity is logged
+as a warning (the same fallback covers tags and remote-tracking refs;
+normal ref-database writes never produce this state).
+A node that is itself a complete ref with child refs beneath it
+(a merged node) lists the union of its snapshot tree entries and the
+child ref names, folding a same-name collision in favor of the child
+ref; if that ref does not peel to a commit, lookup semantics prevail
+\(em the node itself is
+.B ENOENT
+even though the parent listing still shows the folded directory
+entry (the shape mismatch is logged as a warning; a listing entry is
+enumeration only and never a promise of accessibility).
 A branch whose ref does not peel to a commit (e.g.\& manually
 pointed at a blob or tree with
 .BR "git update\-ref" )
@@ -227,6 +251,9 @@ The symbolic ref
 .I refs/remotes/<remote>/HEAD
 is hidden (access yields
 .BR ENOENT );
+a non\-symbolic ref written directly at that path (with
+.B "git update\-ref"
+) is not hidden and is treated as an ordinary tracking ref;
 a ref that does not peel to a commit is likewise not presented
 .RB ( ENOENT ).
 Namespace existence follows the ref database: a namespace whose only
@@ -236,6 +263,30 @@ still renders as an
 .B empty
 directory (not suppressed), and fills in as soon as any tracking ref
 appears.
+A bare namespace ref \(em a complete ref written directly at
+.IR refs/remotes/<x>
+(by
+.BR "git update\-ref" )
+with no refs beneath it \(em is likewise treated as a namespace, not
+as a presentable ref:
+.I remote/<x>
+renders as an empty synthetic namespace directory, and the ref's own
+commit snapshot is not reachable through
+.I remote/
+(an implicit consequence of the two\-level
+.I <remote>/<branch>
+mapping, unlike the deliberate hiding of symbolic
+.BR HEAD ;
+the
+.I commits
+listing still includes it, since it enumerates every ref under
+.IR refs/ ).
+That unreachability holds only while nothing sits beneath the ref:
+if child refs do coexist under it (only constructible through a
+hand\-edited packed\-refs file), the node instead follows the
+merged\-node rule described under
+.IR branch/ ,
+and the ref body is reachable again through lookup.
 .TP
 .I HEAD/
 Snapshot of the current
@@ -521,6 +572,21 @@ ignoring mount options not supported by the filesystem, but silently
 swallowing mistyped gitfs\-specific keys would hide configuration
 errors, so unknown \-o keys are still classified as described above.
 .TP
+.BI \-t \ type
+Forwarded by
+.BR mount (8)
+only for a dotted filesystem type (a dotless type such as
+.I gitfs
+never produces a \-t argument; a dotted
+.I gitfs.<x>
+is forwarded verbatim), so this is chiefly reachable on a direct
+invocation.
+.BI \-t \ gitfs
+is accepted and noted with one verbose line (a redundant
+self-reference); any other value is a usage error, since the helper's
+filesystem type is
+.IR gitfs .
+.TP
 .B \-r ", " \-w
 Never received from
 .BR mount (8) :
@@ -603,6 +669,24 @@ multi\-GB blobs costs no more than a header lookup, just as getattr
 never triggers the
 .I commits
 revwalk.
+A symlink's
+.B st_size
+is the length after truncation at the first embedded NUL, so
+.B stat
+always agrees with the length
+.B readlink
+returns (a NUL-containing symlink never reports its raw blob size);
+computing it requires reading the (PATH_MAX-bounded) blob content to
+locate the NUL, an explicit exception to the header-only path above
+(that PATH_MAX bound holds only for git's own writes).
+One further pathological form is an explicit exception to this
+stat/readlink agreement: a hand-crafted symlink blob longer than
+PATH_MAX containing no NUL reports
+.B st_size
+as its full (truncation-semantics) length while
+.B readlink
+itself fails with
+.BR ENAMETOOLONG .
 .PP
 .B st_blocks
 is always
@@ -643,7 +727,17 @@ blob at that commit (empty, with a warning, if absent).
 readlink returns the raw blob content, truncated at the first embedded
 NUL (kernel restriction, same as
 .B "git checkout"
-behavior); an empty blob yields an empty target.
+behavior); an empty blob yields an empty target;
+st_size
+reports the truncated length, matching the length readlink returns
+(see File metadata).
+One pathological form is excepted from this agreement: a blob longer
+than PATH_MAX without any NUL (only constructible by hand) fails
+readlink with
+.B ENAMETOOLONG
+while
+.B st_size
+still reports the full length (see File metadata).
 Targets may point anywhere, including outside the snapshot.
 .SS Object replacement
 .B gitfs
@@ -666,7 +760,11 @@ All directory listings (root,
 and tree directories, including the
 .I .gitfs\-submodule
 synthetic entries) are emitted in raw\-byte lexicographic order of each
-path component (memcmp, locale\-independent); tree entries are
+path component (memcmp, locale\-independent); the merged\-node union of
+tree entries and child\-ref names (see under
+.IR branch/ )
+joins that same single ordering, mixing tree entries and child\-ref
+names without grouping by origin; tree entries are
 re\-sorted rather than following git's intrinsic tree order (where
 directory names compare as if suffixed with '/').
 .B statfs
