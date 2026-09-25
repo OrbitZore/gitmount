@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(gitmount
-  VERSION 0.0.3
+  VERSION 0.0.4
   DESCRIPTION "Mount a git repository as a read-only FUSE filesystem"
   LANGUAGES C CXX)
 
