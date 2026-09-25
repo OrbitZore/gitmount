@@ -31,7 +31,7 @@ jobs:
           - os: ubuntu-24.04
             label: linux-amd64-glibc2.39
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Verify tag matches project version
         run: |
@@ -85,7 +85,7 @@ jobs:
           upload-artifact: false
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.label }}
           path: dist/
@@ -102,7 +102,7 @@ jobs:
       attestations: write
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: dist-*
           path: dist
@@ -114,14 +114,14 @@ jobs:
           sha256sum *.tar.gz *.spdx.json > sha256sums.txt
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             dist/*.tar.gz
             dist/*.spdx.json
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/*.tar.gz
