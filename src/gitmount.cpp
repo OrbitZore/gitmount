@@ -948,10 +948,13 @@ std::string Gitmount::submodule_marker_content_locked(const git_oid& commit_tree
   std::string url;
   bool malformed = false;
   auto root = tree_locked(commit_tree, &malformed);
-  const git_oid* modules_oid = nullptr;
+  // Value copy: tree_find returns an optional whose entry (and its oid)
+  // must not outlive the statement — keeping a pointer into it was a
+  // stack-use-after-scope caught by the sanitizer CI.
+  std::optional<git_oid> modules_oid;
   if (root) {
     auto e = rawobj::tree_find(*root, ".gitmodules", repo_->oid_type());
-    if (e && (e->mode == rawobj::kModeBlob || e->mode == rawobj::kModeExec)) modules_oid = &e->oid;
+    if (e && (e->mode == rawobj::kModeBlob || e->mode == rawobj::kModeExec)) modules_oid = e->oid;
   }
   if (!modules_oid) {
     log::warn("no .gitmodules at commit root for submodule '%s'", name.c_str());
