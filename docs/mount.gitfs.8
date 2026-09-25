@@ -1,4 +1,4 @@
-.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q30)
+.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q35)
 .TH MOUNT.GITFS 8 "2026-09-24" "gitfs 0.1.0" "System Administration"
 .SH NAME
 mount.gitfs \- mount a git repository as a read\-only FUSE filesystem
@@ -680,13 +680,16 @@ computing it requires reading the (PATH_MAX-bounded) blob content to
 locate the NUL, an explicit exception to the header-only path above
 (that PATH_MAX bound holds only for git's own writes).
 One further pathological form is an explicit exception to this
-stat/readlink agreement: a hand-crafted symlink blob longer than
-PATH_MAX containing no NUL reports
+stat/readlink agreement: a hand-crafted symlink blob whose
+truncation-semantics length is PATH_MAX or longer, with or without a
+NUL (a NUL first appearing past PATH_MAX still truncates to a
+too-long target; only constructible by hand), reports
 .B st_size
 as its full (truncation-semantics) length while
 .B readlink
 itself fails with
-.BR ENAMETOOLONG .
+.BR ENAMETOOLONG ;
+the kernel accepts symlink targets of at most PATH_MAX\-1 bytes.
 .PP
 .B st_blocks
 is always
@@ -731,13 +734,13 @@ behavior); an empty blob yields an empty target;
 st_size
 reports the truncated length, matching the length readlink returns
 (see File metadata).
-One pathological form is excepted from this agreement: a blob longer
-than PATH_MAX without any NUL (only constructible by hand) fails
-readlink with
+One pathological form is excepted from this agreement: a blob whose
+truncated length is PATH_MAX or longer, with or without any NUL
+(only constructible by hand) fails readlink with
 .B ENAMETOOLONG
 while
 .B st_size
-still reports the full length (see File metadata).
+still reports the truncated length (see File metadata).
 Targets may point anywhere, including outside the snapshot.
 .SS Object replacement
 .B gitfs

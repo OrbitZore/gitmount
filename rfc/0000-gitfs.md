@@ -2,7 +2,7 @@
 
 - RFC 编号: 0000
 - 标题: gitfs — read-only git-to-FUSE 文件系统
-- 状态： Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6、§7.7、§7.8、§7.9、§7.10、§7.11、§7.12、§7.13、§7.14、§7.15、§7.16、§7.17、§7.18、§7.19、§7.20、§7.21、§7.22、§7.23、§7.24（§7.11–§7.15 为定稿后 mount(8) 助手协议核验勘误，§7.16 为定稿后收尾勘误，§7.17 为定稿后边缘口径钉住，§7.18 为定稿后病理形态钉住，§7.19 为定稿后收尾口径补钉，§7.20 为定稿后复核钉缝，§7.21 为定稿后复核钉缝二轮，§7.22 为定稿后复核钉缝三轮，§7.23 为定稿后复核钉缝四轮，§7.24 为定稿后复核钉缝五轮））
+- 状态： Accepted（2026-09-24 评审通过，决议见 §7；2026-09-24 补充决议见 §7.1、§7.2、§7.3、§7.4、§7.5、§7.6、§7.7、§7.8、§7.9、§7.10、§7.11、§7.12、§7.13、§7.14、§7.15、§7.16、§7.17、§7.18、§7.19、§7.20、§7.21、§7.22、§7.23、§7.24、§7.25（§7.11–§7.15 为定稿后 mount(8) 助手协议核验勘误，§7.16 为定稿后收尾勘误，§7.17 为定稿后边缘口径钉住，§7.18 为定稿后病理形态钉住，§7.19 为定稿后收尾口径补钉，§7.20 为定稿后复核钉缝，§7.21 为定稿后复核钉缝二轮，§7.22 为定稿后复核钉缝三轮，§7.23 为定稿后复核钉缝四轮，§7.24 为定稿后复核钉缝五轮，§7.25 为定稿后复核钉缝六轮））
 - 日期: 2026-09-24
 - 目标版本: 0.1.0
 
@@ -165,14 +165,20 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   `refs/tags/foo` 与 `refs/tags/foo/bar`），解析回退钉住（Q27c）：
   查找取**最长 ref 名匹配**（`/tag/foo/bar` 解析为 ref
   `refs/tags/foo/bar` 的 root tree，而非 ref `refs/tags/foo` root
-  tree 下行 entry `bar`；branch/remote 同构），readdir 分组目录下同名
-  的 tree entry 与子 ref 折叠为一项、按子 ref 渲染，命中歧义记警告
-  日志（病态仓库防御，与 tree entry `.`/`..` 的手工构造防御同向，
-  正常 refdb 路径不触发）；**合并节点自身的 readdir 同钉（Q28a）**：
+  tree 下行 entry `bar`；branch/remote 同构），readdir 侧同名折叠钉
+  住——父目录列单中完整 ref 项与子 ref 分组项同名、合并节点自身
+  列单中 tree entry 与子 ref 名同名（见下 Q28a），均折叠为一项、
+  按子 ref 渲染，命中歧义记警告日志（病态仓库防御，与 tree entry
+  `.`/`..` 的手工构造防御同向，正常 refdb 路径不触发；原“分组目
+  录”措辞经 Q35d 改——涉及 tree entry 的折叠只发生在合并节点自
+  身列单，避免与 Q26b 的分组前缀节点撞名、误读为其下存在 tree
+  entry）；**合并节点自身的 readdir 同钉（Q28a）**：
   `/tag/foo` 这类"既是完整 ref 又含子 ref"的合并节点，自身枚举定为
-  ref `foo` root tree 条目 ∪ 子 ref 名的**并集**，同名（tree 恰含
-  entry `bar` 且子 ref 亦名 `bar`）按子 ref 折叠为目录——与父目录
-  折叠口径一致；若 ref `foo` 为非 commit 目标，该节点按本节统一
+  ref `foo` root tree 条目 ∪ 子 ref 名的**并集**（子 ref 名按**首
+  分量**参与并集——多分量子 ref 如 `refs/tags/foo/feature/x` 以
+  `feature` 入列、其下再按嵌套 ref 规则分组渲染，Q35c），同名
+  （tree 恰含 entry `bar` 且子 ref 亦名 `bar`）按子 ref 折叠为目
+  录——与父目录折叠口径一致；若 ref `foo` 为非 commit 目标，该节点按本节统一
   口径 lookup → `ENOENT`，与父目录 readdir 仍渲染折叠目录项形成
   形状失配——**以查找口径为准**（目录项仅为枚举线索、不构成可访问
   性承诺），失配同样记警告日志；分组前缀节点与完整 ref 节点均为
@@ -226,13 +232,17 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
   的 symlink 不得报原始 blob 尺寸（取该值须读 blob 内容定位首个 NUL，
   为下述 header-only 路径的显式例外：symlink blob 上限 PATH_MAX、内容
   本就须为 readlink 读取，代价可忽略——该上限只对 git 正常写入
-  成立）。**不变式的显式例外（Q28b）**：超 PATH_MAX 且无 NUL 的
-  手工 symlink blob（hash-object 手工构造，git 正常写入不产生）——
-  st_size 仍按截断口径报全长（无 NUL 即原始字节数），readlink 则报
-  `ENAMETOOLONG`（见 3.3），"stat 报告的尺寸恒等于 readlink 返回的
+  成立）。**不变式的显式例外（Q28b，谓词经 Q35b 拓宽）**：截断后
+  长度 ≥ PATH_MAX 的手工 symlink blob（hash-object 手工构造，git
+  正常写入不产生——PATH_MAX 上限只约束正常写入），**含 NUL 与否
+  均在此例外内**：无 NUL 形态全长即截断长度、st_size 报全长；
+  NUL 位于 PATH_MAX 之后的形态（如 5000 字节、首 NUL 在 4500）
+  截断长度 4500 ≥ PATH_MAX、st_size 报 4500——两种形态 readlink
+  均报 `ENAMETOOLONG`（见 3.3），"stat 报告的尺寸恒等于 readlink 返回的
   字节数"的不变式在此病理形态显式失效，以 readlink 报错为声明
-  例外（st_size 不回退为 0 或其他值）；取该全长同须读 blob 定位
-  首个 NUL——无 NUL 即 getattr 须全量扫描 blob 方可定全长，Q27a
+  例外（st_size 不回退为 0 或其他值）；取该长度同须读 blob 内容
+  定位首个 NUL——无 NUL 形态即 getattr 须全量扫描 blob 方可定全
+  长（含 NUL 形态读至首个 NUL 即止，同非 header-only），Q27a
   "PATH_MAX 上限、代价可忽略"的代价论证只锚定 git 正常写入、对
   此手工形态失效（man 页 File metadata 已含此让步，此处镜像
   对齐，Q30c）。**尺寸获取
@@ -307,11 +317,11 @@ root tree 以真实目录树形式呈现，用户无需 `checkout` 即可用普�
 
 | 操作 | 行为 |
 |---|---|
-| `getattr` | 路径 → 对象（3.1），失败 `ENOENT`；`commits` 恒为纯缓存读（未生成时 `st_size=0`），**不**触发 revwalk 或指纹重算（见 3.5）；blob 的 `st_size` 经 header-only 读取（`git_odb_read_header`）获得，**不**触发 blob 全量解压（见 3.2/Q19b，与"不触发 revwalk"同构） |
+| `getattr` | 路径 → 对象（3.1），失败 `ENOENT`；`commits` 恒为纯缓存读（未生成时 `st_size=0`），**不**触发 revwalk 或指纹重算（见 3.5）；**普通 blob** 的 `st_size` 经 header-only 读取（`git_odb_read_header`）获得，**不**触发 blob 全量解压（symlink 为显式例外——取截断长度须读内容定位首个 NUL，Q27a；无 NUL 病理形态须全量扫描，Q28b；见 3.2/Q19b/Q35a，与"不触发 revwalk"同构） |
 | `readdir` | 根：固定列表；`branch/tag/remote`：枚举 ref（含 `/` 的名字按目录分组）；`commit`：**恒为空**；tree：枚举 entries（含 `.gitfs-submodule` 合成项）；合并节点：root tree 条目 ∪ 子 ref 名的并集、同名按子 ref 折叠（见 3.1/Q28a）——全部目录（含根，并集含其中）的输出顺序一律按分量原始字节字典序、子 ref 名与 tree 条目混排不分组（见 3.1/Q29a）。注册 `opendir/releasedir`：枚举列表快照挂于 `fi->fh`，保证单目录流内 offset 续读稳定（fuse3 要求），跨目录流实时反映 ref 变化 |
 | `open`/`release` | 仅校验 `O_RDONLY` 系标志（写标志 → `EROFS`，与内核对 ro 挂载的判定一致）；`commits` 首次 `open` 触发生成（见 3.5），且把当前缓冲版本**钉住于 `fi->fh`**——同一次 open 的所有 read 分片读自同一快照，refs 中途变化不影响（与 readdir 的目录流快照同构），`release` 时解除钉住；超限 blob（≥ `--blob-cache-size`，边界钉住见 3.5/Q26d）的 `open` 同构 open-pin：一次性 lookup（单互斥内）+ 全量解压（锁外执行，不阻塞全挂载其他请求），解压块钉住于 `fi->fh`、`release` 释放（见 3.5/Q18a）；`.gitfs.json` 挂载期内不可变，无需钉住 |
 | `read` | 定位 blob（可缓存者经 LRU 缓存；超限者读 open 时钉住的解压块，见 3.5），拷贝 `[offset, offset+size)` 越界截断；合成文件（`commits`、`.gitfs.json`、`.gitfs-submodule`）为整块只读缓冲，`commits` 读 open 时钉住的版本 |
-| `readlink` | symlink blob 内容；内容含嵌入 NUL 时**截断至首个 NUL**（内核 symlink 目标不可含 NUL；与 `git checkout` 的事实行为一致，显式同语义而非 `EIO`）；截断口径与 `st_size` 对齐——symlink 的 stat 尺寸即截断后长度（见 3.2/Q27a）；空 blob → 返回长度 0 的空目标；超过 PATH_MAX → `ENAMETOOLONG`（此病理形态下 st_size 仍按截断口径报全长——“stat 尺寸 = readlink 返回字节数”不变式的显式例外，见 3.2/Q28b） |
+| `readlink` | symlink blob 内容；内容含嵌入 NUL 时**截断至首个 NUL**（内核 symlink 目标不可含 NUL；与 `git checkout` 的事实行为一致，显式同语义而非 `EIO`）；截断口径与 `st_size` 对齐——symlink 的 stat 尺寸即截断后长度（见 3.2/Q27a）；空 blob → 返回长度 0 的空目标；**截断后长度 ≥ PATH_MAX → `ENAMETOOLONG`**（内核接受的目标长度上限为 PATH_MAX−1、恰等于 PATH_MAX 即失败——边界按 Q26d 同款纪律钉为 `>=`，含 NUL 与否同判，Q35b；此病理形态下 st_size 仍按截断口径报长度——“stat 尺寸 = readlink 返回字节数”不变式的显式例外，见 3.2/Q28b） |
 | `statfs` | 汇报本地 ODB 占用为 `f_blocks`（全部 packfile 字节 + loose 对象字节；alternates 指向的外部存储不计入，启用 alternates 时 verbose 日志提示），块大小 4KiB；`f_bfree = f_bavail = 0`——只读卷惯例是 0 空闲，`df` 显示 100% 已用，向用户明确传达"无任何可写空间"（若报全量可用，`df` 会显示 0% 已用，易误导）；`f_files = f_ffree = 0`（精确 inode 计数需全量遍历，v0.1 不承诺，内核与 `df` 均容忍 0） |
 | 其余（`mknod/mkdir/write/…`） | 返回 `EROFS` 或不注册（fuse3 只读挂载兜底）；**xattr 族**（`getxattr/setxattr/listxattr/removexattr`）一律不注册 → libfuse 缺省 `ENOSYS`，内核标记“无 xattr”后统一向用户态报 `ENOTSUP`（SELinux 等环境的 `security.*`/statx 附加字段查询命中此路径，干净短路而非逐次回环） |
 
@@ -799,9 +809,13 @@ gitfs/
 │   ├── unit/                 # Catch2 v3（FetchContent）；path_map、cache、errmap
 │   ├── integration/          # 真实挂载：fixture 仓库 + 断言 readdir/read/readlink
 │   └── fixtures/make_repo.sh # 生成含子模块、symlink（含嵌入 NUL 的
-│                              # symlink blob，及超 PATH_MAX 无 NUL 的
-│                              # 手工 symlink blob——readlink 报
-│                              # ENAMETOOLONG 而 st_size 报全长，Q28b）、
+│                              # symlink blob、超 PATH_MAX 无 NUL 的
+│                              # 手工 symlink blob 与首 NUL 位于
+│                              # PATH_MAX 之后的形态（如 5000 字节、
+│                              # 首 NUL 在 4500）——后两者 readlink 报
+│                              # ENAMETOOLONG 而 st_size 分别报全长与
+│                              # 截断长度（例外谓词两形态均可分辨，
+│                              # Q28b/Q35b）、
 │                              # 中文文件名、非 UTF-8 文件名
 │                              # （原始字节透传）、嵌套分支名（feature/x）、
 │                              # annotated 与 blob tag、可执行文件的测试仓库；
@@ -829,7 +843,10 @@ gitfs/
 │                              # 混排顺序（[aa,ab,bar,zz] 与任一
 │                              # 分组序可分辨）与 bar 同名折叠为
 │                              # 目录（原 blob、折叠后类型可分辨）
-│                              # 断言，Q28a/Q29a/Q33/Q34；
+│                              # 断言，Q28a/Q29a/Q33/Q34（fixture 子层
+│                              # ref 全为单分量——ab/bar/qux；多分量子
+│                              # ref 按首分量入列并分组渲染，见 3.1/
+│                              # Q35c）；
 │                              # 另手改 packed-refs 同时含 update-ref
 │                              # 指向 blob 的 refs/tags/baz 与子层
 │                              # refs/tags/baz/qux，构成非 commit 目标
@@ -889,9 +906,11 @@ gitfs/
     tree 目录 `st_size`=4096（Q26b/Q26d/Q31b）、
     非 UTF-8 文件名按原始字节读回、含嵌入 NUL 的 symlink 截断至首个
     NUL 且 stat 的 `st_size` 与 readlink 返回长度一致（截断后口径，
-    见 3.2/Q27a）、超 PATH_MAX 无 NUL 的手工 symlink blob：readlink
-    报 `ENAMETOOLONG` 而 stat `st_size` 报全长（不变式显式例外，
-    Q28b）、detached HEAD 独有 commit 出现在 `commits` 清单中、存在
+    见 3.2/Q27a）、超 PATH_MAX 无 NUL 与首 NUL 位于 PATH_MAX 之后
+    两类手工 symlink blob：readlink 均报 `ENAMETOOLONG` 而 stat
+    `st_size` 分别报全长与截断长度（不变式显式例外，谓词"截断后
+    长度 ≥ PATH_MAX、含 NUL 与否均在内"，Q28b/Q35b）、detached
+    HEAD 独有 commit 出现在 `commits` 清单中、存在
     blob tag 时 `commits` 仍可成功生成且含全部 commit oid（非
     commit ref 跳过不计错，见 3.5）、`commits` 清单排序归一后与
     `git --no-replace-objects rev-list --all` 输出一致（notes/stash
@@ -916,10 +935,13 @@ gitfs/
     runner 抖动大，不作门禁），见 3.5/Q17a；锁外解压另设可选
     参考断言：超限 blob open 解压期间并发的根 readdir 不被长时
     间阻塞（自管 runner、宽松阈值），见 3.4/Q18a）；getattr 零解压
-    断言：`-v` 挂载下对含大 blob 的目录做 `ls -l`（getattr 全遍历），
-    verbose 日志不出现任何解压事件（blob 尺寸经 header-only 读取
-    获得、getattr 不触发全量解压，见 3.2/Q19b——与“getattr 不触
-    发 revwalk”断言同构）；可缓存 LRU 装载的锁分段另设可选参考
+    断言：`-v` 挂载下对含大 blob 的目录做 `ls -l`（getattr 全遍历，
+    断言限定**不含 symlink 的目录**——fixture 的 symlink 条目按
+    Q27a/Q28b 合法触发内容读取乃至全量扫描、不在本断言范围，
+    Q35a），verbose 日志不出现任何解压事件（普通 blob 尺寸经
+    header-only 读取获得、getattr 不触发全量解压，见 3.2/Q19b，
+    与“getattr 不触发 revwalk”断言同构）；可缓存 LRU 装载的锁分
+    段另设可选参考
     断言：大容量 `--blob-cache-size` 挂载下首次读大可缓存 blob 期
     间并发的根 readdir 不被长时间阻塞（自管 runner、宽松阈值，见
     3.5/Q19a）；
@@ -1200,7 +1222,11 @@ gitfs/
   判定一律经此获得，getattr/open 不为取 size 触发 blob 全量解压
   ——与 §3.3 已钉住的“getattr 不触发 revwalk”同构补全；§4 增
   “getattr 不产生解压日志”断言（`-v` 下 `ls -l` 含大 blob 目录、
-  解压事件计数为 0）；man 页 File metadata 与 `--blob-cache-size`
+  解压事件计数为 0；该断言经 §7.25(a)/Q35 限定目录不含 symlink
+  ——symlink 的 st_size 按 §7.17(a)/Q27a 须读内容定位 NUL、病理
+  形态按 §7.18(b)/Q28b 须全量扫描，含 symlink 的目录合法触发
+  解压，且 §3.3 getattr 行同步补 symlink 例外半句）；man 页
+  File metadata 与 `--blob-cache-size`
   描述同步。
 
 ### 7.10 帮助文本措辞对齐（2026-09-24，review round 5/5 跟进）
@@ -1501,7 +1527,11 @@ gitfs/
   entry 防御手工构造却不防 refs）。钉住：查找取**最长 ref 名匹配**
   （`/tag/foo/bar` 解析为 ref `refs/tags/foo/bar` 而非 ref `foo`
   的 tree 下行 entry `bar`，branch/remote 同构），readdir 分组目录
-  下同名的 tree entry 与子 ref 折叠为一项、按子 ref 渲染，命中
+  下同名的 tree entry 与子 ref 折叠为一项、按子 ref 渲染（该句
+  “分组目录”措辞经 §7.25(d)/Q35 改——涉及 tree entry 的折叠只发
+  生在合并节点自身列单（Q28a），“分组”易与 Q26b 分组前缀节点撞
+  名、误读为其下存在 tree entry；父目录列单的折叠为完整 ref 项
+  与子 ref 分组项同名合一，不含 tree entry），命中
   歧义记警告日志（病态仓库防御，正常 refdb 路径不触发）；§3.1
   嵌套 ref 条目与 man 页 branch/ 条目同步、§4 增回退断言（折叠
   歧义警告的断言经 §7.23(b)/Q33 补齐）；
@@ -1520,7 +1550,10 @@ gitfs/
   前缀"的合并节点（`refs/tags/foo` 与 `refs/tags/foo/bar` 并存
   时的 `/tag/foo`）自身枚举未钉。钉住：readdir 定为该 ref root
   tree 条目 ∪ 子 ref 名的并集，同名（tree 恰含 entry `bar`）
-  按子 ref 折叠为目录；ref `foo` 为非 commit 目标时该节点
+  按子 ref 折叠为目录（子 ref 名按首分量参与并集——多分量子 ref
+  如 `refs/tags/foo/feature/x` 以 `feature` 入列、其下再按嵌套
+  ref 规则分组，该半句经 §7.25(c)/Q35 补钉：fixture 子 ref 全为
+  单分量、多分量行为原先仅可推定）；ref `foo` 为非 commit 目标时该节点
   getattr → ENOENT 与父目录 readdir 折叠目录项的形状失配
   **以查找口径为准**（目录项仅为枚举线索，不构成可访问性承诺，
   失配记警告日志——该警告的 §4 断言经 §7.23(b)/Q33 补齐）；§3.1
@@ -1535,7 +1568,12 @@ gitfs/
   PATH_MAX"的代价论证只对 git 正常写入成立（手工
   hash-object 构造无此约束）。钉住：该病理形态 readlink 报
   `ENAMETOOLONG`、st_size 仍按截断口径报全长（无 NUL 即原始
-  字节数），为该不变式的**显式例外**；§3.2/§3.3 钉住、§4
+  字节数），为该不变式的**显式例外**（例外谓词经 §7.25(b)/Q35
+  拓宽为“截断后长度 ≥ PATH_MAX、含 NUL 与否均在内”——原“超
+  PATH_MAX 且无 NUL”未覆盖 NUL 位于 PATH_MAX 之后的形态，该形
+  态不变式同样被证伪却落在声明例外之外、形式自相矛盾；边界同
+  由“超过”钉为 ≥——内核接受的目标长度上限为 PATH_MAX−1，恰等
+  于 PATH_MAX 的截断长度应失败）；§3.2/§3.3 钉住、§4
   fixture 增超限 blob 断言、man 页 File metadata 与 Symbolic
   links 同步。
 
@@ -1688,3 +1726,51 @@ gitfs/
   并集/顺序断言行同步点名（只列 tree 条目即缺 `ab` 补闭第二
   方向）、§7.19(a)/§7.23(a) 勘误链注记修正（`zz` 只闭合构成
   与类型两形态）。
+
+### 7.25 复核钉缝六轮（2026-09-24，定稿后 review round 15 跟进）
+
+- **Q35 四处钉缝、一处措辞撞名与提交惯例补记（已决）**：round 15
+  复核确认 Q27–Q34 八轮钉缝全部闭合（Q27+ 交叉引用可解析、状态
+  行与 round 编号 7–14 连贯、man 页对语义改动同步、fixture 可分
+  辨性论证严谨），另发现四处一句级缺口与一处术语撞名，均无结构
+  调整、按惯例一笔钉住：
+  (a) **§3.3 getattr 行未随 Q27a/Q28b 同步（主要）**：行内仍无条
+  件写"blob 的 st_size 经 header-only 读取、不触发 blob 全量解压"，
+  而 §3.2 已改"普通 blob 的尺寸一律 header-only"并将 symlink
+  列为显式例外（Q27a 须读内容定位 NUL、Q28b 病理形态须全量扫
+  描）——正是 Q30b 为 readdir 行修复的同款"表格行自包含"缺口。
+  钉住：行内主语改"普通 blob"并内联 symlink 例外半句；连带 §4
+  "getattr 零解压"断言限定"不含 symlink 的目录"——fixture 含
+  symlink，遍历含 symlink 的目录时其 lstat 按 Q27a/Q28b 合法触
+  发解压、断言原文会误报；§7.9(b) 勘误链注记；man 页 File
+  metadata 已含 symlink 例外让步（Q27a/Q28b 两处原文已同步），
+  无须再动；
+  (b) **Q28b 例外谓词过窄与 ENAMETOOLONG 边界（主要）**：谓词
+  "超 PATH_MAX 且无 NUL"未覆盖"NUL 位于 PATH_MAX 之后"形态（如
+  5000 字节、首 NUL 在 4500：截断长度 4500 ≥ PATH_MAX → readlink
+  报 ENAMETOOLONG 而 st_size=4500）——Q27a 不变式在该形态被证
+  伪却落在声明例外之外，形式自相矛盾；且"超过 PATH_MAX"字面
+  （>）放行恰等于 PATH_MAX 的截断长度，而内核接受的目标长度上
+  限为 PATH_MAX−1。钉住：例外谓词拓宽为"截断后长度 ≥ PATH_MAX
+  （无论是否含 NUL）"、边界按 Q26d 同款纪律钉为 `>=`；§3.2/
+  §3.3 与 man 页 File metadata/Symbolic links 四处同步；§4
+  fixture 增首 NUL 位于 PATH_MAX 之后的形态与对应断言（两形态
+  分别验证 st_size 报全长/截断长度，谓词两分支均可分辨）；
+  §7.18(b) 勘误链注记；
+  (c) **合并节点并集的多分量子 ref 未钉（微）**：fixture 子 ref 全
+  为单分量（foo/ab、foo/bar、baz/qux），refs/tags/foo/feature/x
+  这类多分量子 ref 在并集中按首分量分组渲染仅可推定。钉住：
+  §3.1 Q28a 补半句——子 ref 名按首分量参与并集、多分量形态其
+  下再按嵌套 ref 规则分组；§4 fixture 补注单分量为特例；
+  §7.18(a) 勘误链注记；
+  (d) **Q27c "分组目录"措辞撞名（微）**：与既定术语"分组前缀节点"
+  （Q26b：纯合成目录、不含 tree 条目）撞名，易误读为 /tag 下存
+  在 tree entry，而涉及 tree entry 的同名折叠只发生在合并节点自
+  身列单（Q28a）、父目录列单的折叠为完整 ref 项与子 ref 分组项
+  同名合一。钉住：§3.1 该句改为两个折叠场景各自点名、§7.17(c)
+  勘误链注记；
+  （记账）Q27–Q34 八轮改动此前未逐轮提交，与"每轮一提交"惯例
+  不一致；八轮改动交叠于同一批行、回溯无法按轮精确拆分，故以
+  合并提交补记于本次提交之前，本条起恢复每轮一提交。man 页头
+  注释随本条实际改动（File metadata/Symbolic links 两处）由
+  Q1-Q30 升至 Q1-Q35。
