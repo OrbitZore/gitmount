@@ -7,7 +7,8 @@ engineering conventions pinned in its design document
 ## Getting started
 
 ```sh
-git clone <your-fork>
+git clone https://github.com/OrbitZore/gitfs
+cd gitfs
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DGITFS_WERROR=ON
 cmake --build build
 ctest --test-dir build          # unit tests always; integration needs /dev/fuse

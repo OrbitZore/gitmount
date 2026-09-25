@@ -25,9 +25,10 @@ Practical guidance:
 
 ## Reporting a vulnerability
 
-Please report privately to the repository maintainers (use the contact
-address in the repository's commit history or `git shortlog -sne` to find
-active maintainers). Include:
+Please report privately via
+[GitHub security advisories](https://github.com/OrbitZore/gitfs/security/advisories/new)
+("Report a vulnerability"), or contact the maintainers directly (see
+`git shortlog -sne` for active maintainers). Include:
 
 1. The gitfs version (`mount.gitfs --version`) and library versions.
 2. A minimal reproduction — ideally a repository shape describable with

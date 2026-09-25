@@ -28,4 +28,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixture repository, real-mount integration suite, CI matrix, man page,
   GPL-3.0-or-later licensing.
 
-[Unreleased]: https://github.com/gitfs/gitfs/compare/000000000000...main
+[Unreleased]: https://github.com/OrbitZore/gitfs/commits/main/CHANGELOG.md
