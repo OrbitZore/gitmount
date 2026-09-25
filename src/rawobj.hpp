@@ -56,16 +56,24 @@ std::optional<TreeIndex> index_tree(const char* data, std::size_t len, git_oid_t
 // index_tree. Returns nullopt if `off` is out of range.
 std::optional<TreeEnt> entry_at(const TreeData& tree, std::uint32_t off, git_oid_t oid_type);
 
-// Find an entry by exact name. Trees with more than kLinearScanMax
-// entries use binary search under git's tree ordering (directory names
-// compare as if suffixed with '/'); smaller trees scan linearly, which
-// needs no ordering assumption at all.
+// Find an entry by exact name, whatever its kind (file, symlink, gitlink
+// or directory). Trees with more than kLinearScanMax entries binary-search
+// TWICE under git's tree ordering — with the bare-name key (a file victim
+// sorts before all name-extending siblings) and with the directory-slot
+// key "name/" (a directory victim sorts after siblings extending it with
+// bytes below '/'); D/F uniqueness means at most one pass can hit.
+// Smaller trees scan linearly, which needs no ordering assumption.
 constexpr std::size_t kLinearScanMax = 64;
 std::optional<TreeEnt> tree_find(const TreeData& tree, std::string_view name, git_oid_t oid_type);
 
-// Compare a probe name against an entry name under the '/'-suffix rule
-// (RFC 0000 §3.1 ordering note; exposed for unit tests).
-int cmp_tree_name(std::string_view entry_name, bool entry_is_tree, std::string_view probe);
+// Compare a probe name against an entry name under git's tree order
+// (directory names compare as if suffixed with '/'). `tree_slot` selects
+// the probe's effective sort key: its directory slot "name/" (looking
+// for a directory) or the bare name (file/symlink/gitlink entries, whose
+// stored key has no suffix). The probe's position differs between the
+// two keys, which is why tree_find runs both passes. Exposed for tests.
+int cmp_tree_name(std::string_view entry_name, bool entry_is_tree, std::string_view probe,
+                  bool tree_slot);
 
 // Hot-path commit facts: root tree oid + committer time (seconds).
 // Parents are deliberately not kept — the revision walk uses libgit2's

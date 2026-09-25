@@ -75,31 +75,23 @@ std::optional<TreeEnt> entry_at(const TreeData& tree, std::uint32_t off, git_oid
   return e;
 }
 
-int cmp_tree_name(std::string_view entry_name, bool entry_is_tree, std::string_view probe) {
+int cmp_tree_name(std::string_view entry_name, bool entry_is_tree, std::string_view probe,
+                  bool tree_slot) {
   const std::size_t n = std::min(entry_name.size(), probe.size());
   const int c = n ? std::memcmp(entry_name.data(), probe.data(), n) : 0;
   if (c != 0) return c;
-  if (entry_name.size() == probe.size()) {
-    // Equal bytes: a lookup match. (Under strict git ordering a tree
-    // "foo" sorts as "foo/", but D/F uniqueness means a base name occurs
-    // at most once — matching libgit2's byname semantics, treat same
-    // bytes as found regardless of directory-ness.)
-    return 0;
-  }
-  if (entry_name.size() > n) {
-    // The entry extends the probe (e.g. "x-y" vs probe "x"): the probe's
-    // effective sort key is "x/" — its directory slot in git tree order —
-    // so the tie-break is entry_name[n] vs '/'. Comparing against '\0'
-    // instead sent the binary search the wrong way whenever the sibling's
-    // next byte is < '/' (hyphens!): "llvm-as-fuzzer" sorts BEFORE the
-    // directory "llvm-as/" yet compared greater than the probe.
-    return static_cast<int>(static_cast<unsigned char>(entry_name[n])) - '/';
-  }
-  // The probe extends the entry: the entry continues with '/' if it is a
-  // tree (its stored sort key), else effectively terminates.
-  const char entry_next = entry_is_tree ? '/' : '\0';
+  // The entry's stored sort key continues with '/' for trees, else ends.
+  const char entry_next = entry_name.size() > n ? entry_name[n] : (entry_is_tree ? '/' : '\0');
+  // The probe's effective key: "name/" for the directory-slot pass, the
+  // bare name (virtual '\0') for the file pass. Using the slot key for a
+  // file probe (0.0.3) sent the search right past file victims sitting
+  // before their extension siblings ("at_file.c" vs "at_file.c.args");
+  // using the bare key for a directory probe (0.0.2) missed directories
+  // whose siblings extend them with bytes below '/' ("llvm-as" vs
+  // "llvm-as-fuzzer", which sorts before the slot "llvm-as/").
+  const char probe_next = probe.size() > n ? probe[n] : (tree_slot ? '/' : '\0');
   return static_cast<int>(static_cast<unsigned char>(entry_next)) -
-         static_cast<int>(static_cast<unsigned char>(probe[n]));
+         static_cast<int>(static_cast<unsigned char>(probe_next));
 }
 
 std::optional<TreeEnt> tree_find(const TreeData& tree, std::string_view name, git_oid_t oid_type) {
@@ -113,18 +105,22 @@ std::optional<TreeEnt> tree_find(const TreeData& tree, std::string_view name, gi
   }
   // Binary search over git's stored tree order. Trees written by git are
   // canonically sorted (the same assumption libgit2's byname lookup
-  // makes); malformed hand-crafted trees simply miss, as before.
-  std::size_t lo = 0, hi = tree.offsets.size();
-  while (lo < hi) {
-    const std::size_t mid = lo + (hi - lo) / 2;
-    auto e = entry_at(tree, tree.offsets[mid], oid_type);
-    if (!e) return std::nullopt;
-    const int c = cmp_tree_name(e->name, e->mode == kModeTree, name);
-    if (c == 0) return e;
-    if (c < 0)
-      lo = mid + 1;
-    else
-      hi = mid;
+  // makes); malformed hand-crafted trees simply miss, as before. Two
+  // passes with the two probe keys (see cmp_tree_name) cover both victim
+  // kinds; D/F uniqueness means at most one exact-name entry exists.
+  for (bool tree_slot : {false, true}) {
+    std::size_t lo = 0, hi = tree.offsets.size();
+    while (lo < hi) {
+      const std::size_t mid = lo + (hi - lo) / 2;
+      auto e = entry_at(tree, tree.offsets[mid], oid_type);
+      if (!e) return std::nullopt;
+      const int c = cmp_tree_name(e->name, e->mode == kModeTree, name, tree_slot);
+      if (c == 0) return e;
+      if (c < 0)
+        lo = mid + 1;
+      else
+        hi = mid;
+    }
   }
   return std::nullopt;
 }
