@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Critical Tier-2 regression (0.0.2): the large-tree binary search
+  compared the probe against a plain `'\0'` terminator instead of the
+  probe's directory slot (`name + '/'`), flipping the search direction
+  whenever a sibling extends the name with a byte below `'/'` (hyphens:
+  a file `llvm-as-fuzzer` sorts before the directory `llvm-as/`). On
+  llvm-project 44 directories — 897 entries, 0.49% — became ENOENT
+  while still being listed, making their whole subtrees unreachable.
+  The comparator now tie-breaks against the directory slot; the
+  exhaustive (N, position) disagreement-sibling matrix (832 previously
+  failing combinations) is a unit test.
+
 ## [0.0.2] - 2026-09-25
 
 ### Changed
