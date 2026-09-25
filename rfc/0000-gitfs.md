@@ -710,25 +710,25 @@ root 挂载）与 boot 常见的 `nofail`/`_netdev` 均不因未知键失败。
         <repo> <dir> -f -o rw，解析须容忍 GNU getopt 式选项置换）
 
 选项:
-  -o OPT[,OPT…]       键值/开关形态。gitfs 自有键 blob-cache-size=<MiB>、
-                       tree-cache-size=<MiB>（连字符与下划线拼法等价），
-                       与同名长选项语义、校验完全一致；同一键重复给出
-                       取"后者胜"（出现序：fstab 条目 → 命令行选项按
-                       命令行先后，-o 串内从左到右），对齐 mount(8) 的
-                       fstab+CLI 合并惯例，不因该覆盖流退出 1；与硬编
-                       码基线同义的键（ro/nosuid/nodev/
-                       default_permissions/use_ino）接受为冗余无操作；
-                       `rw` 同样接受为无操作并记 stderr 警告（见上）；
-                       到达 `-o` 串的无关 VFS 键按上文双轨分诊（名单
-                       见上；user 族附带键实测口径见上）；`fsname=`
-                       允许透传覆盖基线（cosmetic，仅影响展示名），
+  -o OPT[,OPT…]       键值/开关形态。gitfs 自有键
+                       blob-cache-size=<MiB>、tree-cache-size=<MiB>（连
+                       字符与下划线拼法等价），与同名长选项语义、校验完
+                       全一致；同一键重复给出取"后者胜"（出现序：
+                       fstab 条目 → 命令行选项按命令行先后，-o 串内从左
+                       到右），对齐 mount(8) 的 fstab+CLI 合并惯例，不因
+                       该覆盖流退出 1；与硬编码基线同义的键（ro/nosuid/
+                       nodev/default_permissions/use_ino）接受为冗余无操
+                       作；`rw` 同样接受为无操作并记 stderr 警告（见
+                       上）；到达 `-o` 串的无关 VFS 键按上文双轨分诊（名
+                       单见上；user 族附带键实测口径见上）；`fsname=` 允
+                       许透传覆盖基线（cosmetic，仅影响展示名），
                        `subtype=` 覆盖基线 → 参数错误退出 1（基线保
-                       护——/proc/mounts 的 type 字段与 mount -t
-                       gitfs/findmnt -t gitfs 的匹配依赖它，ro/nosuid/
-                       nodev/default_permissions/use_ino 同列保护）；
-                       其余键原样透传 libfuse 选项解析器（如
-                       kernel_cache；allow_other 需 /etc/fuse.conf 启
-                       用 user_allow_other），未知键由 libfuse 拒绝 →
+                       护——/proc/mounts 的 type 字段与 mount -t gitfs/
+                       findmnt -t gitfs 的匹配依赖它，ro/nosuid/nodev/
+                       default_permissions/use_ino 同列保护）；其余键原
+                       样透传 libfuse 选项解析器（如 kernel_cache；
+                       allow_other 需 /etc/fuse.conf 启用
+                       user_allow_other），未知键由 libfuse 拒绝 →
                        退出 1
   --blob-cache-size <MiB>  blob LRU 缓存上限（默认 64）；值为正整数
                        （十进制 MiB）——0、负数、非数字或溢出 size_t
