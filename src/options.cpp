@@ -186,7 +186,7 @@ bool apply_options_string(const std::string& str, Options& opts, std::string& er
 
 }  // namespace
 
-const char* version_string() { return "gitmount 0.0.2"; }
+const char* version_string() { return "gitmount 0.0.3"; }
 
 const char* usage_text() {
   return R"(usage: mount.gitmount [options] <repository> <mountpoint>
