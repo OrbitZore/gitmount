@@ -12,11 +12,11 @@
 | 讨论与勘误 | git 仓库提交历史（rfc/0000-gitfs.md 的 git log） |
 | 版权 | 本文与项目代码同以 GPL-3.0-or-later 发布（§5 的 LICENSE） |
 
-**状态说明**：2026-09-24 评审通过（决议 Q1–Q7）及其后十九轮
-review（Q8–Q26 评审与勘误、Q27–Q39 定稿后复核钉缝）的全部终局
-口径已并入正文，逐条决议索引见附录 A；本压缩定稿不改变任何已决
-语义。逐轮勘误链、round 编号与提交拆分等过程记录见 git 提交历史
-（10f0dce…db3a576）。
+**状态说明**：2026-09-24 评审通过（决议 Q1–Q7）及其后 Q8–Q26
+（十九轮评审与勘误）与 Q27–Q39（十三轮定稿后复核钉缝）的全部
+终局口径已并入正文，逐条决议索引见附录 A；本压缩定稿不改变任
+何已决语义。逐轮勘误链、round 编号与提交拆分等过程记录见 git
+提交历史（自 10f0dce 起）。
 
 **规范性声明**：§2（术语与要求用语）、§3（详细设计）为规范性内
 容，§4（安全考虑）为规范性的安全分析；§5–§7 为工程实践与规划、
@@ -369,14 +369,15 @@ commit 解析为一个 commit 对象，
   路径`注册表（受 3.4 单互斥保护），后到路径命中已占用哈希时依次
   取 `H(path || '#' || k)`（k=1,2,…）中最小的未占用值——不同路
   径必得不同 inode；跨重挂载可复现性在冲突路径上除外（10⁶ 条目
-  生日碰撞概率 ≈ 3×10⁻⁸，注册表是正确性兜底而非预期路径）。条
-  目**懒注册**——仅 getattr/readdir 实际解析过的路径才入表，不做
-  全仓库预注册；挂载期内**不回收**（inode 号永不复用，规避"同号
-  异对象"对 `find -inum`、NFS 句柄类工具的误导）；占用上界 ∝
-  挂载期内被触及的**不同** VFS 路径数（每条 ≈ 路径字节数 + 数十
-  字节开销，百万级触及 ≈ 数十 MB 量级），README 与
-  filesystem-semantics.md 中声明（§5）。挂载基线因此含 `use_ino`
-  （3.7）。
+  生日碰撞概率 ≈ 3×10⁻⁸，注册表是正确性兜底而非预期路径）；根
+  的固定 ino=1 同样占用注册表一席（路径哈希恰为 1 时亦消歧，概
+  率 ~2⁻⁶⁴）。条目**懒注册**——仅 getattr/readdir 实际解析过
+  的路径才入表，不做全仓库预注册；挂载期内**不回收**（inode 号
+  永不复用，规避"同号异对象"对 `find -inum`、NFS 句柄类工具的
+  误导）；占用上界 ∝ 挂载期内被触及的**不同** VFS 路径数（每
+  条 ≈ 路径字节数 + 数十字节开销，百万级触及 ≈ 数十 MB 量
+  级），README 与 filesystem-semantics.md 中声明（§5）。挂载
+  基线因此含 `use_ino`（3.7）。
 - `st_uid`/`st_gid`：挂载进程的 uid/gid（fuse 默认行为）。
 - **合成文件与目录的元数据**：`commits` 与 `.gitfs.json` 为
   `S_IFREG | 0444`、`nlink=1`（写路径本就 EROFS，`cp` 类工具按只
@@ -432,7 +433,8 @@ commit 解析为一个 commit 对象，
 - v0.1 以 **fuse3 多线程模式** 运行，但所有 libgit2 调用集中在
   `GitRepo` 包装类内，受**单互斥**串行化（libgit2 全局线程需
   `git_libgit2_init`，且 1.x 对同 repository 的并发只读有保证，
-  仍保守串行化——性能瓶颈在 I/O 而非锁）。
+  仍保守串行化——性能瓶颈在 I/O 而非锁）；M3 基准（§7）不达标
+  时再引入按 oid 分片锁。
 - **让锁例外一——revwalk 分 chunk**：`commits` 生成的 revwalk 每
   批 `git_revwalk_next` 一定数量（如 4096）后释放单互斥让其他请求
   插队，随后重取继续，walker 本身仍归生成线程独占（revwalk 句柄
@@ -785,47 +787,49 @@ gc/prune、手改 refs）。逐项对策：
 
 ```
 gitfs/
-├── CMakeLists.txt            # >= 3.16，C++17，-Wall -Wextra -Wpedantic
-│                             # -Werror(CI)；install: $(sbindir)/mount.gitfs
-│                             # + $(mandir)/man8
-├── LICENSE                   # GPL-3.0-or-later（SPDX 标注同左）
-├── README.md                 # 快速开始、语义声明（/commits 首次 open 的
-│                             # 停顿语义 3.4；超限 blob open 等待语义与
-│                             # 锁外解压不阻塞他请求 3.5；可缓存 LRU
-│                             # 装载瞬时重复解压可能 3.5；挂载期间禁
-│                             # gc 3.1；st_ino 注册表内存上界与不回收
-│                             # 3.2）、FAQ
+├── CMakeLists.txt               # >= 3.16，C++17，-Wall -Wextra -Wpedantic
+│                                # -Werror(CI)；install: $(sbindir)/mount.gitfs
+│                                # + $(mandir)/man8
+├── LICENSE                      # GPL-3.0-or-later（SPDX 标注同左）
+├── README.md                    # 快速开始、语义声明（/commits 首次 open 的
+│                                # 停顿语义 3.4；超限 blob open 等待语义与
+│                                # 锁外解压不阻塞他请求 3.5；可缓存 LRU
+│                                # 装载瞬时重复解压可能 3.5；挂载期间禁
+│                                # gc 3.1；st_ino 注册表内存上界与不回收
+│                                # 3.2）、FAQ
 ├── CONTRIBUTING.md / CODE_OF_CONDUCT.md / SECURITY.md / CHANGELOG.md
-├── .clang-format             # Google 风格
+├── .clang-format                # Google 风格
 ├── .gitignore / .gitattributes
-├── .github/workflows/ci.yml  # lint + build + test 矩阵（gcc/clang × ubuntu）
-├── rfc/                      # 本目录：设计文档先行
+├── .github/workflows/ci.yml     # lint + build + test 矩阵（gcc/clang × ubuntu）
+├── rfc/                         # 本目录：设计文档先行
 ├── src/
-│   ├── main.cpp              # CLI/mount(8) 助手参数解析、fuse 启动
-│   ├── gitfs.hpp/.cpp        # fuse_ops 实现（路径解析、VFS 语义）
-│   ├── gitrepo.hpp/.cpp      # libgit2 RAII 封装（ref 解析、tree 下行）
-│   ├── object_cache.hpp      # blob LRU（单测覆盖）
-│   ├── path_map.hpp/.cpp     # "/branch/x/y" → 解析状态机（纯函数，重点单测）
-│   ├── errmap.cpp            # git_to_errno
+│   ├── main.cpp                 # CLI/mount(8) 助手参数解析、fuse 启动
+│   ├── gitfs.hpp/.cpp           # fuse_ops 实现（路径解析、VFS 语义）
+│   ├── gitrepo.hpp/.cpp         # libgit2 RAII 封装（ref 解析、tree 下行）
+│   ├── object_cache.hpp         # blob LRU（单测覆盖）
+│   ├── path_map.hpp/.cpp        # "/branch/x/y" → 解析状态机（纯函数，重点单测）
+│   ├── errmap.cpp               # git_to_errno
 │   └── log.hpp
 ├── tests/
-│   ├── unit/                 # Catch2 v3 [CATCH2]（FetchContent）：path_map 状态机
-│   │                         # （畸形路径、Unicode、超长 oid）、LRU 逐出、
-│   │                         # 错误映射表、st_ino 碰撞消歧（哈希可注入）
-│   ├── integration/          # 真实挂载：fixture 仓库 + 断言（见下）
-│   └── fixtures/make_repo.sh # 生成测试仓库（fixture 清单见下）
+│   ├── unit/                    # Catch2 v3 [CATCH2]（FetchContent）：
+│   │                            # path_map 状态机（畸形路径、Unicode、
+│   │                            # 超长 oid）、LRU 逐出、错误映射表、
+│   │                            # st_ino 碰撞消歧（哈希可注入）
+│   ├── integration/             # 真实挂载：fixture 仓库 + 断言（见下）
+│   └── fixtures/make_repo.sh    # 生成测试仓库（fixture 清单见下）
 └── docs/
-    ├── filesystem-semantics.md    # 对用户承诺的语义（本文 4.x 的稳定
-    │                              # 化版本；必含"gc/prune 并发""空仓
-    │                              # 库""readdir 字节字典序"三节与
-    │                              # st_ino 注册表内存上界声明）
-    ├── maintenance-checklist.md   # 维护核对单：3.7 演进条款的载体
-    │                              # （新 util-linux 发布 → diff mount(8)
-    │                              # "Filesystem-independent mount
-    │                              # options" 表与 libmount 转发键集 →
-    │                              # 按"是否对 gitfs 无操作"分诊 → 更新
-    │                              # 枚举名单与本文用例）
-    └── mount.gitfs.8              # man 手册（roff；install 到 man8）
+    ├── filesystem-semantics.md  # 对用户承诺的语义：本文 §3
+    │                            # （3.1/3.2/3.3）的稳定化版本；必含
+    │                            # "gc/prune 并发""空仓库"
+    │                            # "readdir 字节字典序"三节与
+    │                            # st_ino 注册表内存上界声明
+    ├── maintenance-checklist.md # 维护核对单：3.7 演进条款的载体
+    │                            # （新 util-linux 发布 → diff mount(8)
+    │                            # "Filesystem-independent mount
+    │                            # options" 表与 libmount 转发键集 →
+    │                            # 按"是否对 gitfs 无操作"分诊 → 更新
+    │                            # 枚举名单与本文用例）
+    └── mount.gitfs.8            # man 手册（roff；install 到 man8）
 ```
 
 - **提交规范**：Conventional Commits [CONVCOMMITS]
@@ -991,11 +995,11 @@ gitfs/
 
 ## 附录 A. 评审决议索引（资料性）
 
-2026-09-24 评审（决议 Q1–Q7）及其后十九轮 review（Q8–Q26 评审与
-勘误、Q27–Q39 定稿后复核钉缝）的全部终局口径均已并入 §3/§5 正文；
-本表为可追溯索引（决议 → 终局口径 → 正文锚点）。逐轮勘误链、round
-编号与提交拆分等过程记录见 git 提交历史（10f0dce…db3a576）；本文
-压缩定稿不改变任何已决语义。
+2026-09-24 评审（决议 Q1–Q7）及其后 Q8–Q26（十九轮评审与勘误）
+与 Q27–Q39（十三轮定稿后复核钉缝）的全部终局口径均已并入 §3/§5
+正文；本表为可追溯索引（决议 → 终局口径 → 正文锚点）。逐轮勘误
+链、round 编号与提交拆分等过程记录见 git 提交历史（自 10f0dce
+起）；本文压缩定稿不改变任何已决语义。
 
 | 决议 | 终局口径（锚点） |
 |---|---|
