@@ -60,7 +60,16 @@ else()
       GIT_TAG        v1.9.7)
   endif()
   FetchContent_MakeAvailable(libgit2)
-  set(GITMOUNT_LIBGIT2_TARGET libgit2package)
+  # libgit2package's INTERFACE carries only $<INSTALL_INTERFACE:...>
+  # includes (empty for build-tree consumers — its PUBLIC includes live on
+  # the object library that merely feeds its sources). Local builds got
+  # away with it only when system libgit2 headers happened to be present;
+  # wrap it with the source-tree includes ourselves.
+  add_library(gitmount_vendored_libgit2 INTERFACE)
+  target_link_libraries(gitmount_vendored_libgit2 INTERFACE libgit2package)
+  target_include_directories(gitmount_vendored_libgit2
+    INTERFACE "${libgit2_SOURCE_DIR}/include")
+  set(GITMOUNT_LIBGIT2_TARGET gitmount_vendored_libgit2)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -69,6 +78,7 @@ endif()
 option(GITMOUNT_WERROR "Treat warnings as errors" OFF)
 
 add_library(gitmount_warnings INTERFACE)
+include(CheckCXXCompilerFlag)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(gitmount_warnings INTERFACE
     -Wall -Wextra -Wpedantic)
@@ -76,10 +86,14 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(gitmount_warnings INTERFACE -Werror)
   endif()
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    # Catch2's TEST_CASE macros use __COUNTER__, which recent clang flags
-    # as a C2y extension under -Wpedantic (third-party macro, not our
-    # code). Listed last so it survives the group enables above.
-    target_compile_options(gitmount_warnings INTERFACE -Wno-c2y-extensions)
+    # Catch2's TEST_CASE macros use __COUNTER__, flagged as a C2y extension
+    # by recent clang under -Wpedantic (third-party macro, not our code).
+    # Older clang does not know the flag at all (and -Werror makes the
+    # unknown option fatal), so probe first.
+    check_cxx_compiler_flag("-Wno-c2y-extensions" GITMOUNT_HAVE_WNO_C2Y)
+    if(GITMOUNT_HAVE_WNO_C2Y)
+      target_compile_options(gitmount_warnings INTERFACE -Wno-c2y-extensions)
+    endif()
   endif()
 endif()
 

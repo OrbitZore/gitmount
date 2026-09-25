@@ -135,7 +135,7 @@ replace-old" "$(ls -1 "$MNT/branch")"
   check "executable bit" test -x "$MNT/branch/main/src/run.sh"
   check "chinese filename" test -f "$MNT/branch/main/docs/中文文档.txt"
   check "non-utf8 filename (raw bytes)" \
-    sh -c "test -f \"$MNT/branch/main/\$(printf '\\xff\\xfe.bin')\""
+    bash -c "test -f \"$MNT/branch/main/\$(printf '\\xff\\xfe.bin')\""
   check_eq "symlink target" "README.md" "$(readlink "$MNT/branch/main/link-to-readme")"
   check "symlink traverses" test -f "$MNT/branch/main/link-to-readme"
 

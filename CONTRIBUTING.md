@@ -33,8 +33,11 @@ Integration tests perform real FUSE mounts; they skip cleanly when
    it affects mount-visible semantics, integration assertions in
    `tests/integration/run_tests.sh` (add the fixture shape to
    `tests/fixtures/make_repo.sh` if needed).
-4. **Format** with the repository's `.clang-format` (Google style):
-   `clang-format -i src/** tests/**`. CI checks formatting.
+4. **Format** with the pinned clang-format 18 (`python -m pip install
+   clang-format==18.1.8`, then add `~/.local/bin` to PATH or use the
+   mamba/virtualenv entry point). The major version is pinned because
+   clang-format majors disagree on formatting; CI checks with exactly
+   this version. Run `clang-format -i src/** tests/**`.
 5. **Warnings are errors in CI** (`-Wall -Wextra -Wpedantic -Werror`).
 
 ## Semantics-relevant checklists

@@ -13,14 +13,18 @@ permissions:
 
 jobs:
   lint:
-    name: lint (clang-format)
+    name: lint (clang-format 18)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install clang-format
-        run: sudo apt-get update && sudo apt-get install -y clang-format
+      - name: Install pinned clang-format
+        # Pinned so the check matches what contributors are told to install
+        # (see CONTRIBUTING.md); distro clang-formats drift between majors.
+        run: python -m pip install clang-format==18.1.8
       - name: Check formatting
         run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          clang-format --version
           find src tests \( -name '*.cpp' -o -name '*.hpp' \) -print0 | \
             xargs -0 clang-format --dry-run --Werror
 
@@ -41,20 +45,23 @@ jobs:
             printf '%s: %s\n' "$sha" "$msg"
             case "$msg" in
               "feat:"*|"fix:"*|"docs:"*|"test:"*|"refactor:"*|"chore:"*|"perf:"*|"build:"*|"ci:"*|\
+              "feat!:"*|"fix!:"*|"docs!:"*|"test!:"*|"refactor!:"*|"chore!:"*|"perf!:"*|"build!:"*|"ci!:"*|\
               "feat("*"):"*|"fix("*"):"*|"docs("*"):"*|"test("*"):"*|"refactor("*"):"*|\
               "chore("*"):"*|"perf("*"):"*|"build("*"):"*|"ci("*"):"*) ;;
+              "feat("*")!:"*|"fix("*")!:"*|"docs("*")!:"*|"test("*")!:"*|"refactor("*")!:"*|\
+              "chore("*")!:"*|"perf("*")!:"*|"build("*")!:"*|"ci("*")!:"*) ;;
               *) echo "  -> not a Conventional Commit"; bad=1 ;;
             esac
           done < <(git rev-list --no-merges "$range")
           exit $bad
 
   build-test:
-    name: ${{ matrix.compiler }} (ubuntu-24.04, system libgit2)
+    name: ${{ matrix.cxx }} (ubuntu-24.04, system libgit2)
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        compiler: [gcc, clang]
+        cxx: [g++, clang++]
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -68,7 +75,7 @@ jobs:
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
           -DGITMOUNT_WERROR=ON
-          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
       - name: Build
         run: cmake --build build
       - name: Unit tests
@@ -76,14 +83,14 @@ jobs:
       - name: Integration tests (skips without /dev/fuse)
         run: ctest --test-dir build --output-on-failure -R '^integration$'
       - name: Integration tests as root (mount(8) helper scenarios)
-        if: matrix.compiler == 'gcc'
+        if: matrix.cxx == 'g++'
         run: >
           sudo env PATH="$PATH" TMPDIR=/tmp
           tests/integration/run_tests.sh "$PWD/build/mount.gitmount"
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: mount.gitmount-${{ matrix.compiler }}-system
+          name: mount.gitmount-${{ matrix.cxx }}-system
           path: build/mount.gitmount
 
   vendored-build:

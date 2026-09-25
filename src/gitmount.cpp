@@ -1006,7 +1006,7 @@ int Gitmount::cb_readdir(const char*, void* buf, fuse_fill_dir_t filler, off_t o
   // Plain filler stats (ino + type): full attributes stay with getattr —
   // FUSE_FILL_DIR_PLUS is deliberately not claimed with partial stats.
   for (std::size_t i = static_cast<std::size_t>(offset); i < list->entries.size(); ++i) {
-    struct stat st{};
+    struct stat st {};
     st.st_ino = list->entries[i].ino;
     st.st_mode = list->entries[i].mode;
     if (filler(buf, list->entries[i].name.c_str(), &st, static_cast<off_t>(i + 1),
