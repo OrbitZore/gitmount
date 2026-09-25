@@ -1,4 +1,4 @@
-// gitfs — read-only git-to-FUSE filesystem (RFC 0000).
+// gitmount — read-only git-to-FUSE filesystem (RFC 0000).
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // GitRepo: libgit2 RAII wrapper (RFC 0000 §3.4/§5). Every libgit2 call in
@@ -18,7 +18,7 @@
 
 #include <git2.h>
 
-namespace gitfs {
+namespace gitmount {
 
 // Parse a .gitmodules blob (INI-style) into path -> url. Missing url for a
 // path yields the empty string; malformed lines are skipped. Pure function,
@@ -81,7 +81,7 @@ class GitRepo {
 
   // Tree enumeration/lookup. tree_entries returns raw entries (including
   // pathological "." / ".." names and overlong names — filtering and warning
-  // is policy in gitfs.cpp).
+  // is policy in gitmount.cpp).
   std::optional<std::vector<TreeEntry>> tree_entries(const git_oid& tree);
   std::optional<TreeEntry> tree_entry(const git_oid& tree, const std::string& name);
 
@@ -89,7 +89,7 @@ class GitRepo {
   // §3.2/§3.5). 0 on success; ENOENT when the object is missing.
   int blob_size(const git_oid& oid, std::uint64_t* size_out);
 
-  // Full blob read (decompresses on every call; caching is gitfs's job).
+  // Full blob read (decompresses on every call; caching is gitmount's job).
   // 0 on success, else errno.
   int read_blob(const git_oid& oid, std::string* out);
 
@@ -127,8 +127,8 @@ void libgit2_global_init();
 void libgit2_global_shutdown();
 
 // Apply RFC 0000 §3.5 cache tuning: tree/commit per-type limit raised to
-// 1 MiB, blob per-type limit pinned to 0 (no double caching with gitfs's
+// 1 MiB, blob per-type limit pinned to 0 (no double caching with gitmount's
 // own LRU), total budget = tree_cache_bytes.
 void libgit2_configure_cache(std::uint64_t tree_cache_bytes);
 
-}  // namespace gitfs
+}  // namespace gitmount

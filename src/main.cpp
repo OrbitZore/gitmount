@@ -1,4 +1,4 @@
-// gitfs — read-only git-to-FUSE filesystem (RFC 0000).
+// gitmount — read-only git-to-FUSE filesystem (RFC 0000).
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // mount(8) helper entry point (RFC 0000 §3.7). Exit codes:
@@ -18,7 +18,7 @@
 #define FUSE_USE_VERSION 31
 #include <fuse3/fuse.h>
 
-#include "gitfs.hpp"
+#include "gitmount.hpp"
 #include "gitrepo.hpp"
 #include "log.hpp"
 #include "options.hpp"
@@ -38,7 +38,7 @@ bool canonicalize(const std::string& in, std::string* out) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  using namespace gitfs;
+  using namespace gitmount;
 
   const auto parsed = cli::parse(argc, argv);
   if (parsed.action == cli::Action::PrintHelp) {
@@ -50,8 +50,8 @@ int main(int argc, char** argv) {
     return 0;
   }
   if (parsed.action == cli::Action::Fail) {
-    std::fprintf(stderr, "mount.gitfs: %s\n", parsed.message.c_str());
-    std::fputs("Try 'mount.gitfs --help' for more information.\n", stderr);
+    std::fprintf(stderr, "mount.gitmount: %s\n", parsed.message.c_str());
+    std::fputs("Try 'mount.gitmount --help' for more information.\n", stderr);
     return parsed.exit_code;
   }
 
@@ -64,7 +64,7 @@ int main(int argc, char** argv) {
   // ---- repository validation (exit code 2 path, RFC 0000 §3.7) ----------
   std::string abs_repo;
   if (!canonicalize(opts.repository, &abs_repo)) {
-    std::fprintf(stderr, "mount.gitfs: cannot access repository '%s': %s\n",
+    std::fprintf(stderr, "mount.gitmount: cannot access repository '%s': %s\n",
                  opts.repository.c_str(), std::strerror(errno));
     libgit2_global_shutdown();
     return 2;
@@ -72,14 +72,14 @@ int main(int argc, char** argv) {
   std::string git_err;
   auto repo = GitRepo::open(abs_repo, &git_err);
   if (!repo) {
-    std::fprintf(stderr, "mount.gitfs: '%s' is not a readable git repository: %s\n",
+    std::fprintf(stderr, "mount.gitmount: '%s' is not a readable git repository: %s\n",
                  opts.repository.c_str(), git_err.c_str());
     libgit2_global_shutdown();
     return 2;
   }
 
-  auto fs = std::make_unique<Gitfs>(std::move(repo), abs_repo, opts.blob_cache_bytes,
-                                    opts.tree_cache_bytes);
+  auto fs = std::make_unique<Gitmount>(std::move(repo), abs_repo, opts.blob_cache_bytes,
+                                       opts.tree_cache_bytes);
 
   // ---- FUSE argument assembly -------------------------------------------
   // Hardcoded baseline (RFC 0000 §3.7): ro,fsname,default_permissions,
@@ -93,9 +93,9 @@ int main(int argc, char** argv) {
   // is exactly the RFC's intent. "use_ino" stays accepted in -o parsing as
   // a redundant baseline synonym; it is deliberately not forwarded.
   std::vector<std::string> arg_storage = {
-      "mount.gitfs",
+      "mount.gitmount",
       "-o",
-      "ro,fsname=" + opts.fsname + ",default_permissions,subtype=gitfs,nosuid,nodev",
+      "ro,fsname=" + opts.fsname + ",default_permissions,subtype=gitmount,nosuid,nodev",
       "-o",
       "attr_timeout=0",
       "-o",
@@ -107,12 +107,12 @@ int main(int argc, char** argv) {
 
   auto teardown_args = [&fargs] { fuse_opt_free_args(&fargs); };
 
-  struct fuse* fuse = fuse_new(&fargs, Gitfs::fuse_ops(), sizeof(fuse_operations), fs.get());
+  struct fuse* fuse = fuse_new(&fargs, Gitmount::fuse_ops(), sizeof(fuse_operations), fs.get());
   if (!fuse) {
     // libfuse rejected the options (unknown passthrough key) — parameter
     // error per RFC 0000 §3.7.
     std::fprintf(stderr,
-                 "mount.gitfs: invalid mount options (rejected by "
+                 "mount.gitmount: invalid mount options (rejected by "
                  "libfuse)\n");
     teardown_args();
     return 1;
@@ -128,7 +128,7 @@ int main(int argc, char** argv) {
   }
 
   if (fuse_mount(fuse, opts.mountpoint.c_str()) != 0) {
-    std::fprintf(stderr, "mount.gitfs: cannot mount at '%s': %s\n", opts.mountpoint.c_str(),
+    std::fprintf(stderr, "mount.gitmount: cannot mount at '%s': %s\n", opts.mountpoint.c_str(),
                  std::strerror(errno));
     fuse_destroy(fuse);
     teardown_args();
@@ -140,7 +140,7 @@ int main(int argc, char** argv) {
   // SIGTERM -> session exit, RFC 0000 §3.4).
   fuse_daemonize(opts.foreground ? 1 : 0);
   if (fuse_set_signal_handlers(fuse_get_session(fuse)) != 0) {
-    std::fprintf(stderr, "mount.gitfs: cannot install signal handlers\n");
+    std::fprintf(stderr, "mount.gitmount: cannot install signal handlers\n");
     fuse_unmount(fuse);
     fuse_destroy(fuse);
     teardown_args();

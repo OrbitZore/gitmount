@@ -1,13 +1,13 @@
 <div align="center">
 
-# gitfs
+# gitmount
 
 **Mount a git repository as a read-only filesystem.**
 
 Browse every branch, tag and commit with plain `ls`, `cat`, `grep` and
 `diff` — no checkout, no worktree, no archive.
 
-[![CI](https://github.com/OrbitZore/gitfs/actions/workflows/ci.yml/badge.svg)](https://github.com/OrbitZore/gitfs/actions/workflows/ci.yml)
+[![CI](https://github.com/OrbitZore/gitmount/actions/workflows/ci.yml/badge.svg)](https://github.com/OrbitZore/gitmount/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE)
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus)
 ![Platform](https://img.shields.io/badge/platform-Linux-fcc624?logo=linux)
@@ -21,9 +21,9 @@ Browse every branch, tag and commit with plain `ls`, `cat`, `grep` and
 ---
 
 ```console
-$ sudo mount -t gitfs /srv/repos/linux.git /mnt/linux
+$ sudo mount -t gitmount /srv/repos/linux.git /mnt/linux
 $ ls -A /mnt/linux
-.gitfs.json  HEAD  branch  commit  commits  remote  tag
+.gitmount.json  HEAD  branch  commit  commits  remote  tag
 $ ls /mnt/linux/tag
 v5.4  v6.1  v6.6  v6.12  v6.13
 $ grep -n '^VERSION\|^PATCHLEVEL' /mnt/linux/tag/v6.13/Makefile
@@ -38,10 +38,10 @@ a1b2c3d4e5f6...  (full 40-char oid)
 $ sudo umount /mnt/linux
 ```
 
-## Why gitfs?
+## Why gitmount?
 
 Comparing files across revisions normally means juggling `git worktree
-add` / `git archive`, or cloning twice. gitfs makes **every** ref and
+add` / `git archive`, or cloning twice. gitmount makes **every** ref and
 commit of a local repository appear as a plain directory tree, once, and
 lets the tools you already have do the rest:
 
@@ -57,10 +57,12 @@ lets the tools you already have do the rest:
   [libgit2](https://libgit2.com) and [libfuse3](https://github.com/libfuse/libfuse);
   no `git` subprocesses, no network access.
 
-> **Note on the name**: [presslabs/gitfs](https://github.com/presslabs/gitfs)
-> is a different, older project (Python, read-write, cloud-storage
-> backends). This gitfs is a minimal, semantics-first C++17 read-only
-> mount helper. See the [RFC](rfc/0000-gitfs.md) for the comparison.
+> **A note on naming**: during early development this project was briefly
+> called "gitfs". That name belongs to
+> [presslabs/gitfs](https://github.com/presslabs/gitfs) — a different,
+> older project (Python, read-write, cloud-storage backends) — hence the
+> rename to **gitmount**. See the [RFC](rfc/0000-gitmount.md) for the
+> comparison.
 
 ## Features
 
@@ -78,7 +80,7 @@ lets the tools you already have do the rest:
 - Hardened baseline: `refs/replace` never followed, non-UTF-8 names
   passed through verbatim, pathological hand-crafted objects skipped
   with warnings
-- First-class `mount(8)` citizen: `mount -t gitfs`, `/etc/fstab`
+- First-class `mount(8)` citizen: `mount -t gitmount`, `/etc/fstab`
   entries and direct invocation are all equivalent; man page included
 
 ## Requirements
@@ -101,12 +103,12 @@ need `/dev/fuse` + `fusermount3` and skip cleanly otherwise.
 From source (no releases yet — see [CHANGELOG.md](CHANGELOG.md)):
 
 ```sh
-git clone https://github.com/OrbitZore/gitfs
-cd gitfs
+git clone https://github.com/OrbitZore/gitmount
+cd gitmount
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build             # optional: unit + integration
-sudo cmake --install build         # /usr/sbin/mount.gitfs + man8 page
+sudo cmake --install build         # /usr/sbin/mount.gitmount + man8 page
 ```
 
 ## Quick start
@@ -114,23 +116,23 @@ sudo cmake --install build         # /usr/sbin/mount.gitfs + man8 page
 The three equivalent invocation forms:
 
 ```sh
-sudo mount -t gitfs /path/to/repo.git /mnt/gitfs     # via mount(8)
-sudo mount /mnt/gitfs                                # via /etc/fstab
-sudo mount.gitfs /path/to/repo.git /mnt/gitfs        # direct
+sudo mount -t gitmount /path/to/repo.git /mnt/gitmount     # via mount(8)
+sudo mount /mnt/gitmount                                # via /etc/fstab
+sudo mount.gitmount /path/to/repo.git /mnt/gitmount        # direct
 ```
 
 `/etc/fstab` example (auto-mount at boot, survive missing repo):
 
 ```
-/srv/repos/linux.git  /mnt/linux  gitfs  ro,noatime,nofail  0  0
+/srv/repos/linux.git  /mnt/linux  gitmount  ro,noatime,nofail  0  0
 ```
 
-Unmount with `sudo umount /mnt/gitfs` (or `fusermount3 -u`). The daemon
+Unmount with `sudo umount /mnt/gitmount` (or `fusermount3 -u`). The daemon
 also exits gracefully on `SIGINT`/`SIGTERM`. Validate a configuration
 without mounting — including repository readability — with `-f`:
 
 ```sh
-mount.gitfs /srv/repos/linux.git /mnt/linux -f && echo config OK
+mount.gitmount /srv/repos/linux.git /mnt/linux -f && echo config OK
 ```
 
 ## Usage
@@ -138,14 +140,14 @@ mount.gitfs /srv/repos/linux.git /mnt/linux -f && echo config OK
 ### Layout
 
 ```
-/mnt/gitfs/
+/mnt/gitmount/
 ├── branch/      # local branches (nested names render as directories)
 ├── tag/         # tags, peeled to commits
 ├── commit/      # any commit by full oid — never listable
 ├── remote/      # remote-tracking refs: <remote>/<branch>
 ├── HEAD/        # snapshot of the current HEAD
 ├── commits      # every reachable commit oid, one per line
-└── .gitfs.json  # mount metadata (immutable snapshot)
+└── .gitmount.json  # mount metadata (immutable snapshot)
 ```
 
 ### Everyday tasks
@@ -189,9 +191,9 @@ unreadable · `3` mount failure.
 
 - [docs/filesystem-semantics.md](docs/filesystem-semantics.md) — the
   stable, user-facing semantics contract
-- [docs/mount.gitfs.8](docs/mount.gitfs.8) — the manual page (also
-  installed as `man 8 mount.gitfs`)
-- [rfc/0000-gitfs.md](rfc/0000-gitfs.md) — the normative design document
+- [docs/mount.gitmount.8](docs/mount.gitmount.8) — the manual page (also
+  installed as `man 8 mount.gitmount`)
+- [rfc/0000-gitmount.md](rfc/0000-gitmount.md) — the normative design document
   (Chinese)
 - [docs/maintenance-checklist.md](docs/maintenance-checklist.md) —
   operational checklists and measured performance baselines
@@ -201,7 +203,7 @@ unreadable · `3` mount failure.
 Measured on a 5,000-file synthetic tree (details in the
 [maintenance checklist](docs/maintenance-checklist.md)):
 
-| Workload | ext4 | gitfs |
+| Workload | ext4 | gitmount |
 |---|---|---|
 | `find -type f` (metadata walk) | 6 ms | 49 ms |
 | open+read+close, 4-deep path | 5 µs | ~350 µs |
@@ -237,7 +239,7 @@ The sharp edges pinned by the design (full contract:
 ## FAQ
 
 **Can I write through the mount?** No — every write path returns
-`EROFS`. gitfs is a read-only data plane by design.
+`EROFS`. gitmount is a read-only data plane by design.
 
 **Is it safe to mount untrusted repositories?** Symlink targets are
 repository-controlled and passed through verbatim (like `git
@@ -255,11 +257,12 @@ a non-UTF-8 name appears exactly as it would after `git checkout` — no
 escaping, no renaming.
 
 **How do I match mounts?** `/proc/mounts` shows the type as
-`fuse.gitfs` with source `gitfs`: `findmnt -t fuse.gitfs`.
+`fuse.gitmount` with source `gitmount`: `findmnt -t fuse.gitmount`.
 
-**Another project is also called gitfs.** See
-[presslabs/gitfs](https://github.com/presslabs/gitfs) — different
-project, different goals (read-write, cloud backends, Python).
+**Wasn't this called gitfs?** During early development, yes. That name
+belongs to [presslabs/gitfs](https://github.com/presslabs/gitfs) (Python,
+read-write, cloud backends — a different project), so this project became
+**gitmount**.
 
 ## Contributing
 
@@ -276,8 +279,8 @@ Built on [libgit2](https://libgit2.com),
 [Catch2](https://github.com/catchorg/Catch2); validated against the
 behavior of [util-linux](https://github.com/util-linux/util-linux)
 mount(8) and git itself. The design was shaped by 39 rounds of review
-recorded in the [RFC](rfc/0000-gitfs.md).
+recorded in the [RFC](rfc/0000-gitmount.md).
 
 ## License
 
-[GPL-3.0-or-later](LICENSE) © The gitfs authors.
+[GPL-3.0-or-later](LICENSE) © The gitmount authors.

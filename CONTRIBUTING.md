@@ -1,15 +1,15 @@
-# Contributing to gitfs
+# Contributing to gitmount
 
-Thanks for your interest in improving gitfs! This project follows the
+Thanks for your interest in improving gitmount! This project follows the
 engineering conventions pinned in its design document
-([rfc/0000-gitfs.md](rfc/0000-gitfs.md) §5).
+([rfc/0000-gitmount.md](rfc/0000-gitmount.md) §5).
 
 ## Getting started
 
 ```sh
-git clone https://github.com/OrbitZore/gitfs
-cd gitfs
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DGITFS_WERROR=ON
+git clone https://github.com/OrbitZore/gitmount
+cd gitmount
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DGITMOUNT_WERROR=ON
 cmake --build build
 ctest --test-dir build          # unit tests always; integration needs /dev/fuse
 ```
@@ -17,11 +17,11 @@ ctest --test-dir build          # unit tests always; integration needs /dev/fuse
 Integration tests perform real FUSE mounts; they skip cleanly when
 `/dev/fuse` or `fusermount3` is unavailable. To also exercise the
 `mount(8)` exec-helper scenarios, run the integration script as root
-(`sudo tests/integration/run_tests.sh build/mount.gitfs`).
+(`sudo tests/integration/run_tests.sh build/mount.gitmount`).
 
 ## Development workflow
 
-1. **Discuss first for semantic changes.** gitfs's behavior is pinned by
+1. **Discuss first for semantic changes.** gitmount's behavior is pinned by
    RFC 0000; anything that changes observable filesystem semantics needs a
    design discussion (issue or RFC amendment) before implementation.
    Bug fixes that realign behavior with the RFC do not.
@@ -40,7 +40,7 @@ Integration tests perform real FUSE mounts; they skip cleanly when
 ## Semantics-relevant checklists
 
 - New or changed `-o` keys: update the triage tracks in `src/options.cpp`,
-  the unit tests, `docs/mount.gitfs.8`, and possibly
+  the unit tests, `docs/mount.gitmount.8`, and possibly
   `docs/maintenance-checklist.md`.
 - New user-visible behavior: update `docs/filesystem-semantics.md` and the
   man page (bump its decision watermark).
@@ -49,7 +49,7 @@ Integration tests perform real FUSE mounts; they skip cleanly when
 
 ## Reporting bugs
 
-Open an issue with: the gitfs version (`mount.gitfs --version`), the
+Open an issue with: the gitmount version (`mount.gitmount --version`), the
 libgit2/libfuse versions, the reproduction steps (ideally against a
 repository shape the fixture script can express), and verbose logs
 (`-v`) where relevant. Do not browse untrusted repositories as root
@@ -62,7 +62,7 @@ Releases are produced by the [release workflow](.github/workflows/release.yml)
 
 1. Bump the version in **three synchronized places**:
    `CMakeLists.txt` (`project(... VERSION ...)`), `src/options.cpp`
-   (`version_string()`), `docs/mount.gitfs.8` (`.TH` line).
+   (`version_string()`), `docs/mount.gitmount.8` (`.TH` line).
 2. Move the `[Unreleased]` entries in `CHANGELOG.md` into a version
    heading with a compare link.
 3. Commit (`chore: release v0.0.1`), tag `v0.0.1`, push the tag. The

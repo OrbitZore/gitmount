@@ -1,8 +1,8 @@
-// gitfs — read-only git-to-FUSE filesystem (RFC 0000).
+// gitmount — read-only git-to-FUSE filesystem (RFC 0000).
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Path → parse state machine (RFC 0000 §3.1). Pure syntax-level mapping:
-// everything that needs the refdb/ODB is resolved later in gitfs.cpp. This
+// everything that needs the refdb/ODB is resolved later in gitmount.cpp. This
 // split keeps the parser a pure function (RFC 0000 §5: heavily unit tested).
 //
 // Grammar (component = non-empty byte string without '/'):
@@ -14,7 +14,7 @@
 //   "/HEAD"                      → HeadRoot
 //   "/HEAD/<c>/..."              → HeadPath(comps)
 //   "/commits"                   → CommitsFile
-//   "/.gitfs.json"               → MetaJson
+//   "/.gitmount.json"               → MetaJson
 //
 // Rules pinned by RFC 0000 §3.1/§3.3:
 //   * a component longer than NAME_MAX (255) → err = ENAMETOOLONG
@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-namespace gitfs::pathmap {
+namespace gitmount::pathmap {
 
 enum class Kind {
   Invalid,   // err carries the errno
@@ -64,4 +64,4 @@ constexpr std::size_t kNameMax = 255;
 
 const char* ns_dir_name(Ns ns);
 
-}  // namespace gitfs::pathmap
+}  // namespace gitmount::pathmap

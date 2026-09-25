@@ -1,13 +1,13 @@
 <div align="center">
 
-# gitfs
+# gitmount
 
 **把 git 仓库挂载为只读文件系统。**
 
 用普通的 `ls`、`cat`、`grep`、`diff` 浏览任意分支、tag 与 commit——
 无需 checkout，无需 worktree，无需 archive。
 
-[![CI](https://github.com/OrbitZore/gitfs/actions/workflows/ci.yml/badge.svg)](https://github.com/OrbitZore/gitfs/actions/workflows/ci.yml)
+[![CI](https://github.com/OrbitZore/gitmount/actions/workflows/ci.yml/badge.svg)](https://github.com/OrbitZore/gitmount/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE)
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus)
 ![Platform](https://img.shields.io/badge/platform-Linux-fcc624?logo=linux)
@@ -21,9 +21,9 @@
 ---
 
 ```console
-$ sudo mount -t gitfs /srv/repos/linux.git /mnt/linux
+$ sudo mount -t gitmount /srv/repos/linux.git /mnt/linux
 $ ls -A /mnt/linux
-.gitfs.json  HEAD  branch  commit  commits  remote  tag
+.gitmount.json  HEAD  branch  commit  commits  remote  tag
 $ ls /mnt/linux/tag
 v5.4  v6.1  v6.6  v6.12  v6.13
 $ grep -n '^VERSION\|^PATCHLEVEL' /mnt/linux/tag/v6.13/Makefile
@@ -38,10 +38,10 @@ a1b2c3d4e5f6...  （完整 40 位 oid）
 $ sudo umount /mnt/linux
 ```
 
-## 为什么需要 gitfs？
+## 为什么需要 gitmount？
 
 跨版本比较文件通常意味着反复 `git worktree add` / `git archive`，或
-者克隆两份仓库。gitfs 让本地仓库的**每一个** ref 与 commit 直接呈现
+者克隆两份仓库。gitmount 让本地仓库的**每一个** ref 与 commit 直接呈现
 为普通目录树，剩下的交给已有工具：
 
 - **任意对比任意。** `diff -r /mnt/tag/v6.12 /mnt/tag/v6.13`——分支、
@@ -55,10 +55,10 @@ $ sudo umount /mnt/linux
   [libfuse3](https://github.com/libfuse/libfuse)；不产生 `git` 子进
   程，不访问网络。
 
-> **关于同名项目**：[presslabs/gitfs](https://github.com/presslabs/gitfs)
-> 是另一个更早的项目（Python、读写、云存储后端）。本项目 gitfs 是一
-> 个语义优先、最小化的 C++17 只读挂载助手。对比见
-> [RFC](rfc/0000-gitfs.md)。
+> **关于命名**：本项目早期开发阶段曾短暂叫过“gitfs”。该名字属于
+> [presslabs/gitfs](https://github.com/presslabs/gitfs)——另一个更早
+> 的项目（Python、读写、云存储后端），因此更名为 **gitmount**。对比
+> 见 [RFC](rfc/0000-gitmount.md)。
 
 ## 特性
 
@@ -74,7 +74,7 @@ $ sudo umount /mnt/linux
   **恰好解压一次**（测试断言、`-v` 可观测）
 - 加固基线：不遵循 `refs/replace`、非 UTF-8 名按原始字节透传、手工
   构造的病态对象跳过并告警
-- 一等公民的 `mount(8)` 集成：`mount -t gitfs`、`/etc/fstab` 条目、
+- 一等公民的 `mount(8)` 集成：`mount -t gitmount`、`/etc/fstab` 条目、
   直连调用三种形态等价；附 man 手册
 
 ## 环境要求
@@ -97,12 +97,12 @@ $ sudo umount /mnt/linux
 从源码构建（暂无发布版本——见 [CHANGELOG.md](CHANGELOG.md)）：
 
 ```sh
-git clone https://github.com/OrbitZore/gitfs
-cd gitfs
+git clone https://github.com/OrbitZore/gitmount
+cd gitmount
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build             # 可选：单测 + 集成测试
-sudo cmake --install build         # /usr/sbin/mount.gitfs + man8 手册
+sudo cmake --install build         # /usr/sbin/mount.gitmount + man8 手册
 ```
 
 ## 快速开始
@@ -110,23 +110,23 @@ sudo cmake --install build         # /usr/sbin/mount.gitfs + man8 手册
 三种等价的调用形态：
 
 ```sh
-sudo mount -t gitfs /path/to/repo.git /mnt/gitfs     # 经 mount(8)
-sudo mount /mnt/gitfs                                # 经 /etc/fstab 条目
-sudo mount.gitfs /path/to/repo.git /mnt/gitfs        # 直连调用
+sudo mount -t gitmount /path/to/repo.git /mnt/gitmount     # 经 mount(8)
+sudo mount /mnt/gitmount                                # 经 /etc/fstab 条目
+sudo mount.gitmount /path/to/repo.git /mnt/gitmount        # 直连调用
 ```
 
 `/etc/fstab` 示例（开机自动挂载、仓库缺失时不阻塞启动）：
 
 ```
-/srv/repos/linux.git  /mnt/linux  gitfs  ro,noatime,nofail  0  0
+/srv/repos/linux.git  /mnt/linux  gitmount  ro,noatime,nofail  0  0
 ```
 
-用 `sudo umount /mnt/gitfs` 卸载（或 `fusermount3 -u`）。守护进程收
+用 `sudo umount /mnt/gitmount` 卸载（或 `fusermount3 -u`）。守护进程收
 到 `SIGINT`/`SIGTERM` 也会优雅退出。只校验配置而不实际挂载（含仓库
 可读性检查）用 `-f`：
 
 ```sh
-mount.gitfs /srv/repos/linux.git /mnt/linux -f && echo 配置有效
+mount.gitmount /srv/repos/linux.git /mnt/linux -f && echo 配置有效
 ```
 
 ## 使用
@@ -134,14 +134,14 @@ mount.gitfs /srv/repos/linux.git /mnt/linux -f && echo 配置有效
 ### 目录布局
 
 ```
-/mnt/gitfs/
+/mnt/gitmount/
 ├── branch/      # 本地分支（嵌套名渲染为目录）
 ├── tag/         # tag（annotated 自动 peel 至 commit）
 ├── commit/      # 按完整 oid 访问任意 commit——恒不可枚举
 ├── remote/      # 远端跟踪 ref：<remote>/<branch>
 ├── HEAD/        # 当前 HEAD 的快照
 ├── commits      # 全部可达 commit oid，每行一个
-└── .gitfs.json  # 挂载元信息（不可变快照）
+└── .gitmount.json  # 挂载元信息（不可变快照）
 ```
 
 ### 日常操作
@@ -182,9 +182,9 @@ tar -C /mnt/tag/v6.13 -czf v6.13.tgz .             # 打包某个 tag
 
 - [docs/filesystem-semantics.md](docs/filesystem-semantics.md)——面向
   用户的稳定语义契约
-- [docs/mount.gitfs.8](docs/mount.gitfs.8)——man 手册（安装后
-  `man 8 mount.gitfs`）
-- [rfc/0000-gitfs.md](rfc/0000-gitfs.md)——规范性设计文档
+- [docs/mount.gitmount.8](docs/mount.gitmount.8)——man 手册（安装后
+  `man 8 mount.gitmount`）
+- [rfc/0000-gitmount.md](rfc/0000-gitmount.md)——规范性设计文档
 - [docs/maintenance-checklist.md](docs/maintenance-checklist.md)——
   运维核对单与实测性能基线
 
@@ -193,7 +193,7 @@ tar -C /mnt/tag/v6.13 -czf v6.13.tgz .             # 打包某个 tag
 在 5000 文件的合成树上实测（详见
 [维护核对单](docs/maintenance-checklist.md)）：
 
-| 负载 | ext4 | gitfs |
+| 负载 | ext4 | gitmount |
 |---|---|---|
 | `find -type f`（元数据遍历） | 6 ms | 49 ms |
 | open+read+close（4 层路径） | 5 µs | ~350 µs |
@@ -223,7 +223,7 @@ tar -C /mnt/tag/v6.13 -czf v6.13.tgz .             # 打包某个 tag
 
 ## 常见问题
 
-**可以通过挂载点写入吗？** 不行——所有写路径返回 `EROFS`。gitfs 设
+**可以通过挂载点写入吗？** 不行——所有写路径返回 `EROFS`。gitmount 设
 计上就是只读数据平面。
 
 **挂载不受信仓库安全吗？** 符号链接目标由仓库控制、原样透传（与
@@ -239,12 +239,12 @@ tar -C /mnt/tag/v6.13 -czf v6.13.tgz .             # 打包某个 tag
 **有些文件名显示乱码？** tree 条目名按原始字节透传；非 UTF-8 名与
 `git checkout` 后的表现完全一致——不转义、不改名。
 
-**怎么匹配已挂载的实例？** `/proc/mounts` 中类型为 `fuse.gitfs`、
-源为 `gitfs`：`findmnt -t fuse.gitfs`。
+**怎么匹配已挂载的实例？** `/proc/mounts` 中类型为 `fuse.gitmount`、
+源为 `gitmount`：`findmnt -t fuse.gitmount`。
 
-**还有个同名项目？** 见
-[presslabs/gitfs](https://github.com/presslabs/gitfs)——不同项目、
-不同目标（读写、云后端、Python）。
+**之前不是叫 gitfs 吗？** 早期开发阶段是的。该名字已被
+[presslabs/gitfs](https://github.com/presslabs/gitfs)（Python、读写、
+云后端，另一个项目）占用，因此本项目更名为 **gitmount**。
 
 ## 参与贡献
 
@@ -261,8 +261,8 @@ Commits、测试必需、CI 启用 `-Werror`）。社区规范见
 [Catch2](https://github.com/catchorg/Catch2) 之上；行为对照
 [util-linux](https://github.com/util-linux/util-linux) mount(8) 与
 git 本体实测校验。设计经 39 轮评审打磨，过程记录于
-[RFC](rfc/0000-gitfs.md)。
+[RFC](rfc/0000-gitmount.md)。
 
 ## 许可证
 
-[GPL-3.0-or-later](LICENSE) © gitfs 作者
+[GPL-3.0-or-later](LICENSE) © gitmount 作者

@@ -1,16 +1,16 @@
-// gitfs — read-only git-to-FUSE filesystem (RFC 0000).
+// gitmount — read-only git-to-FUSE filesystem (RFC 0000).
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "log.hpp"
 
 #include <cstdio>
 
-namespace gitfs::log {
+namespace gitmount::log {
 
 namespace {
 bool g_verbose = false;
 
 void emit(const char* level, const char* fmt, va_list ap) {
-  std::fprintf(stderr, "gitfs: %s: ", level);
+  std::fprintf(stderr, "gitmount: %s: ", level);
   std::vfprintf(stderr, fmt, ap);
   std::fputc('\n', stderr);
 }
@@ -48,4 +48,4 @@ void vlog(const char* fmt, ...) {
   va_end(ap);
 }
 
-}  // namespace gitfs::log
+}  // namespace gitmount::log

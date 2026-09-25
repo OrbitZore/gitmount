@@ -1,4 +1,4 @@
-// gitfs — read-only git-to-FUSE filesystem (RFC 0000).
+// gitmount — read-only git-to-FUSE filesystem (RFC 0000).
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "errmap.hpp"
 
@@ -6,7 +6,7 @@
 
 #include <git2.h>
 
-namespace gitfs {
+namespace gitmount {
 
 int git_to_errno(int rc) {
   if (rc >= 0) return 0;
@@ -38,4 +38,4 @@ int git_to_errno(int rc) {
   }
 }
 
-}  // namespace gitfs
+}  // namespace gitmount

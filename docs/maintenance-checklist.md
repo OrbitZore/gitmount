@@ -1,14 +1,14 @@
-# gitfs maintenance checklist
+# gitmount maintenance checklist
 
 Operational checklists for changes that need coordinated updates across
-code, docs and tests. Sources of truth: [rfc/0000-gitfs.md](../rfc/0000-gitfs.md)
-(normative design), [mount.gitfs.8](mount.gitfs.8) (man page),
+code, docs and tests. Sources of truth: [rfc/0000-gitmount.md](../rfc/0000-gitmount.md)
+(normative design), [mount.gitmount.8](mount.gitmount.8) (man page),
 [src/options.cpp](../src/options.cpp) (option triage tables).
 
 ## New util-linux release (RFC 0000 §3.7 evolution clause)
 
 mount(8) forwards unfiltered `-o` keys to helpers. When util-linux changes
-what reaches `mount.gitfs`:
+what reaches `mount.gitmount`:
 
 1. **Diff the man page** — compare the "Filesystem-independent mount
    options" section of `man mount(8)` against the previous release; note
@@ -16,7 +16,7 @@ what reaches `mount.gitfs`:
 2. **Diff the forwarding set** — check `libmount`'s `exec_helper` /
    option-filter list (`libmount/src/optlist.c`, `mount.c` in the
    util-linux tree) for newly filtered or newly forwarded keys.
-3. **Triage each new arriving key**: is it a no-op for gitfs?
+3. **Triage each new arriving key**: is it a no-op for gitmount?
    - no-op → add to the **enumerate track** in `src/options.cpp`
      (`kEnumerateTrack`) and to the unit test list in
      `tests/unit/test_options.cpp`.
@@ -24,7 +24,7 @@ what reaches `mount.gitfs`:
      (`kRejectTrack`) with a dedicated error message.
    - ambiguous → open an issue; until resolved the key falls through to
      libfuse (unknown → exit 1), which is the safe default.
-4. **Update docs**: `docs/mount.gitfs.8` (INVOCATION/OPTIONS),
+4. **Update docs**: `docs/mount.gitmount.8` (INVOCATION/OPTIONS),
    `README.md` if user-visible, and this checklist's snapshot below.
 5. **Run** `ctest --test-dir build` — the integration suite has exec-path
    scenarios gated on root; re-run locally with sudo when the forwarding
@@ -38,7 +38,7 @@ caller asked for `ro`; `user`/`users` implicitly carry
 
 ## Man page version bump
 
-`docs/mount.gitfs.8` carries the reviewed-decision watermark in its first
+`docs/mount.gitmount.8` carries the reviewed-decision watermark in its first
 comment line. Whenever user-visible semantics change, update the page and
 bump the watermark (RFC 0000 Q31 process convention).
 
@@ -57,10 +57,10 @@ bump the watermark (RFC 0000 Q31 process convention).
 ## FUSE / kernel changes
 
 - The `use_ino` option was removed in libfuse3 (high-level mounts always
-  honor the filesystem's `st_ino`); gitfs keeps accepting `use_ino` in
+  honor the filesystem's `st_ino`); gitmount keeps accepting `use_ino` in
   `-o` as a redundant baseline synonym without forwarding it. If libfuse
   ever reintroduces a switch, re-evaluate.
-- readdirplus: gitfs fills plain `dirent` stats (ino + type) only; do not
+- readdirplus: gitmount fills plain `dirent` stats (ino + type) only; do not
   claim `FUSE_FILL_DIR_PLUS` without full attribute support.
 
 ## Performance gates (RFC 0000 §3.5)
@@ -77,7 +77,7 @@ On self-hosted runners (shared-runner walls are too noisy):
 
 Measured baselines (dev machine, 5000-file synthetic tree, warm caches):
 
-| Workload | ext4 | gitfs | Notes |
+| Workload | ext4 | gitmount | Notes |
 |---|---|---|---|
 | `find -type f` (metadata walk) | 6 ms | 49 ms | ~10 µs/file; libgit2 tree cache effective |
 | `stat` of a root-level entry | — | ~35 µs | ≈ 2 FUSE round trips |

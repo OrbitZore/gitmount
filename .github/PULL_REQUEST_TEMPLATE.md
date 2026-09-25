@@ -23,7 +23,7 @@
 ### If observable filesystem semantics changed
 
 - [ ] `docs/filesystem-semantics.md` updated.
-- [ ] `docs/mount.gitfs.8` updated (bump the decision watermark in its
+- [ ] `docs/mount.gitmount.8` updated (bump the decision watermark in its
       header comment).
 - [ ] `README.md` and `README.zh-CN.md` updated together (both languages
       stay in sync).

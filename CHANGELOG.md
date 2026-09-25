@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Renamed the project from **gitfs** to **gitmount** (in place, per the
+  frozen RFC 0000): the mount helper is `mount.gitmount`, the fstype is
+  `gitmount`, and the synthetic files are `.gitmount.json` /
+  `.gitmount-submodule`. The earlier name collided with
+  [presslabs/gitfs](https://github.com/presslabs/gitfs) — a different,
+  older project.
+
 ### Added
 - Core filesystem per RFC 0000 §3: `/branch`, `/tag`, `/commit`,
   `/remote`, `/HEAD` namespaces with longest-ref-name resolution, merged
@@ -14,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ref enumeration, and `refs/replace` passthrough.
 - `/commits` — first-open generation (single-flight, chunked revwalk,
   fingerprint invalidation, deterministic topological order) and
-  `.gitfs.json` mount metadata.
+  `.gitmount.json` mount metadata.
 - Metadata mapping per RFC 0000 §3.2: mode table, committer-time
   timestamps, path-hash `st_ino` with collision disambiguation registry,
   submodule markers, symlink truncation semantics.
@@ -28,4 +36,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixture repository, real-mount integration suite, CI matrix, man page,
   GPL-3.0-or-later licensing.
 
-[Unreleased]: https://github.com/OrbitZore/gitfs/commits/main/CHANGELOG.md
+[Unreleased]: https://github.com/OrbitZore/gitmount/commits/main/CHANGELOG.md

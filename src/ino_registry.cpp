@@ -1,8 +1,8 @@
-// gitfs — read-only git-to-FUSE filesystem (RFC 0000).
+// gitmount — read-only git-to-FUSE filesystem (RFC 0000).
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ino_registry.hpp"
 
-namespace gitfs {
+namespace gitmount {
 
 std::uint64_t InoRegistry::fnv1a64(const std::string& s) {
   const std::uint64_t kOffsetBasis = 14695981039346656037ULL;
@@ -56,4 +56,4 @@ std::uint64_t InoRegistry::register_path(const std::string& path) {
   }
 }
 
-}  // namespace gitfs
+}  // namespace gitmount

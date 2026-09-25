@@ -1,19 +1,19 @@
-// gitfs unit tests — shared pure helpers (byte order, JSON escaping, time).
+// gitmount unit tests — shared pure helpers (byte order, JSON escaping, time).
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <catch2/catch_test_macros.hpp>
 
-#include "gitfs.hpp"
+#include "gitmount.hpp"
 
-using gitfs::byte_less;
-using gitfs::iso8601_utc;
-using gitfs::json_quote_path;
+using gitmount::byte_less;
+using gitmount::iso8601_utc;
+using gitmount::json_quote_path;
 
 TEST_CASE("byte_less is memcmp order, no locale", "[util]") {
   // '.' (0x2E) < '/' (0x2F): the git tree order would place "foo.txt"
   // before "foo/" — the pinned order is plain bytes (RFC 0000 §3.1).
   CHECK(byte_less("foo", "foo.txt"));
   CHECK(byte_less("foo.txt", "foo2"));
-  CHECK(byte_less(".gitfs.json", "HEAD"));
+  CHECK(byte_less(".gitmount.json", "HEAD"));
   CHECK(byte_less("HEAD", "branch"));
   CHECK(byte_less("commit", "commits"));
   CHECK(byte_less("commits", "remote"));

@@ -1,4 +1,4 @@
-// gitfs — read-only git-to-FUSE filesystem (RFC 0000).
+// gitmount — read-only git-to-FUSE filesystem (RFC 0000).
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // st_ino registry (RFC 0000 §3.2).
@@ -27,7 +27,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace gitfs {
+namespace gitmount {
 
 class InoRegistry {
  public:
@@ -53,4 +53,4 @@ class InoRegistry {
   std::unordered_map<std::uint64_t, std::string> by_ino_;
 };
 
-}  // namespace gitfs
+}  // namespace gitmount

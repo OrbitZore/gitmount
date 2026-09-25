@@ -1,5 +1,5 @@
 name: Bug report
-description: gitfs does not behave as documented
+description: gitmount does not behave as documented
 labels: [bug]
 body:
   - type: markdown
@@ -7,15 +7,15 @@ body:
       value: |
         Thanks for taking the time to report a bug! Before filing, please
         check [docs/filesystem-semantics.md]
-        (https://github.com/OrbitZore/gitfs/blob/main/docs/filesystem-semantics.md) —
+        (https://github.com/OrbitZore/gitmount/blob/main/docs/filesystem-semantics.md) —
         several read-only behaviors are pinned by design (e.g. `/commit`
         is never listable, `refs/replace` is never followed).
   - type: input
     id: version
     attributes:
-      label: gitfs version
-      description: Output of `mount.gitfs --version`
-      placeholder: gitfs 0.0.1
+      label: gitmount version
+      description: Output of `mount.gitmount --version`
+      placeholder: gitmount 0.0.1
     validations:
       required: true
   - type: input

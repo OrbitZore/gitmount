@@ -1,4 +1,4 @@
-// gitfs — read-only git-to-FUSE filesystem (RFC 0000).
+// gitmount — read-only git-to-FUSE filesystem (RFC 0000).
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Blob LRU cache (RFC 0000 §3.5).
@@ -19,7 +19,7 @@
 //
 // NOT thread-safe by itself: all access happens under the single mutex
 // described in RFC 0000 §3.4. The segmented load (lock / decompress outside
-// the lock / re-lock and re-check) lives in gitfs.cpp.
+// the lock / re-lock and re-check) lives in gitmount.cpp.
 #pragma once
 
 #include <cstddef>
@@ -27,7 +27,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace gitfs {
+namespace gitmount {
 
 class BlobLruCache {
  public:
@@ -86,4 +86,4 @@ class BlobLruCache {
   std::unordered_map<std::string, std::list<Entry>::iterator> index_;
 };
 
-}  // namespace gitfs
+}  // namespace gitmount

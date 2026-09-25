@@ -1,10 +1,10 @@
-// gitfs — read-only git-to-FUSE filesystem (RFC 0000).
+// gitmount — read-only git-to-FUSE filesystem (RFC 0000).
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "path_map.hpp"
 
 #include <cerrno>
 
-namespace gitfs::pathmap {
+namespace gitmount::pathmap {
 
 namespace {
 
@@ -96,7 +96,7 @@ Parsed parse(const std::string& path) {
     p.kind = Kind::Invalid;
     p.err = ENOTDIR;  // /commits/<x>: commits is a regular file
     return p;
-  } else if (head == ".gitfs.json") {
+  } else if (head == ".gitmount.json") {
     if (comps.size() == 1) {
       p.kind = Kind::MetaJson;
       return p;
@@ -119,4 +119,4 @@ Parsed parse(const std::string& path) {
   return p;
 }
 
-}  // namespace gitfs::pathmap
+}  // namespace gitmount::pathmap

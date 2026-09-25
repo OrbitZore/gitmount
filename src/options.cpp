@@ -1,4 +1,4 @@
-// gitfs — read-only git-to-FUSE filesystem (RFC 0000).
+// gitmount — read-only git-to-FUSE filesystem (RFC 0000).
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "options.hpp"
 
@@ -9,7 +9,7 @@
 
 #include "log.hpp"
 
-namespace gitfs::cli {
+namespace gitmount::cli {
 
 namespace {
 
@@ -18,7 +18,7 @@ namespace {
 // ---------------------------------------------------------------------------
 
 // Enumerate track: measured util-linux 2.42.3 keys that reach the -o string
-// and are no-ops for gitfs. Sourced from real exec'd-helper argv capture;
+// and are no-ops for gitmount. Sourced from real exec'd-helper argv capture;
 // maintained via docs/maintenance-checklist.md when util-linux evolves.
 constexpr std::array<const char*, 31> kEnumerateTrack = {
     "atime", "noatime",  "relatime", "strictatime", "lazytime",    "diratime", "nodiratime",
@@ -28,13 +28,13 @@ constexpr std::array<const char*, 31> kEnumerateTrack = {
     "quiet", "showexec", "bsdgroups"};
 
 // Reject track: man mount(8) "Filesystem-independent" table keys with
-// semantics or security impact for gitfs -> dedicated error, exit 1.
+// semantics or security impact for gitmount -> dedicated error, exit 1.
 constexpr std::array<const char*, 10> kRejectTrack = {
     "suid",  "dev",     "remount",   "uid",        "gid",
     "umask", "context", "fscontext", "defcontext", "rootcontext"};
 
 // Table track: man mount(8) "Filesystem-independent" table keys that are
-// no-ops for gitfs and are NOT in the enumerate track (the table also backs
+// no-ops for gitmount and are NOT in the enumerate track (the table also backs
 // negated/valued forms such as noiversion; rule 1 cuts at '=' first).
 constexpr std::array<const char*, 4> kTableTrack = {"noiversion", "norelatime", "nostrictatime",
                                                     "nolazytime"};
@@ -144,36 +144,36 @@ bool apply_options_string(const std::string& str, Options& opts, std::string& er
     }
     if (key == "subtype") {
       error =
-          "option 'subtype' cannot be overridden: the gitfs subtype is part "
+          "option 'subtype' cannot be overridden: the gitmount subtype is part "
           "of the protected mount baseline";
       return false;
     }
     if (key == "rw") {
       // libmount pre-seeds rw unconditionally for mounts without explicit
       // -r/-o ro; accept as a no-op with a stderr warning (RFC 0000 §3.7).
-      opts.warnings.push_back("-o rw ignored: gitfs mounts are always read-only");
+      opts.warnings.push_back("-o rw ignored: gitmount mounts are always read-only");
       continue;
     }
     if (in_table(kBaselineSynonyms, key)) {
       log::vlog(
           "mount option '%s' accepted as redundant (already part of "
-          "the gitfs baseline)",
+          "the gitmount baseline)",
           item.c_str());
       continue;
     }
     if (in_table(kEnumerateTrack, key)) {
-      log::vlog("mount option '%s' accepted and ignored (no-op for gitfs)", item.c_str());
+      log::vlog("mount option '%s' accepted and ignored (no-op for gitmount)", item.c_str());
       continue;
     }
     if (in_table(kRejectTrack, key)) {
       error = std::string("mount option '") + key +
-              "' is not supported by gitfs (read-only filesystem: no "
+              "' is not supported by gitmount (read-only filesystem: no "
               "setuid/device semantics, no remount, no uid/gid/umask "
               "mapping, no SELinux relabeling)";
       return false;
     }
     if (in_table(kTableTrack, key)) {
-      log::vlog("mount option '%s' accepted and ignored (no-op for gitfs)", item.c_str());
+      log::vlog("mount option '%s' accepted and ignored (no-op for gitmount)", item.c_str());
       continue;
     }
     // Neither track claims it: pass through to libfuse (unknown keys are
@@ -185,20 +185,20 @@ bool apply_options_string(const std::string& str, Options& opts, std::string& er
 
 }  // namespace
 
-const char* version_string() { return "gitfs 0.0.1"; }
+const char* version_string() { return "gitmount 0.0.1"; }
 
 const char* usage_text() {
-  return R"(usage: mount.gitfs [options] <repository> <mountpoint>
+  return R"(usage: mount.gitmount [options] <repository> <mountpoint>
        (options may appear after the positional arguments — mount(8)
         execs the helper as e.g. "<repo> <dir> -f -o rw")
 
 Mount a local git repository (bare or non-bare) as a read-only FUSE
 filesystem exposing branch/, tag/, commit/, remote/, HEAD/, commits
-and .gitfs.json at the mount root. Equivalent forms:
+and .gitmount.json at the mount root. Equivalent forms:
 
-  mount -t gitfs <repo> <dir>          via mount(8) exec'ing this helper
+  mount -t gitmount <repo> <dir>          via mount(8) exec'ing this helper
   mount <dir>                          via an /etc/fstab entry
-  mount.gitfs <repo> <dir> [options]   direct invocation
+  mount.gitmount <repo> <dir> [options]   direct invocation
 
 options:
   -o OPT[,OPT...]               mount options (comma separated)
@@ -226,7 +226,7 @@ options:
                                   blobs and cache-miss loads)
   -n, -s, -N <ns>               mount(8) forwarded flags (no-mtab / sloppy /
                                   namespace): tolerated and ignored
-  -t gitfs                      accepted and ignored (verbose note); any
+  -t gitmount                      accepted and ignored (verbose note); any
                                   other value is a fstype mismatch (exit 1)
   --version, --help
 
@@ -358,12 +358,12 @@ ParseResult parse(int argc, char* const argvIn[]) {
               return res;
             }
           } else if (opt == 't') {
-            if (value == "gitfs") {
-              log::vlog("-t gitfs accepted (redundant self-reference)");
+            if (value == "gitmount") {
+              log::vlog("-t gitmount accepted (redundant self-reference)");
             } else {
               res.action = Action::Fail;
               res.exit_code = 1;
-              res.message = "fstype mismatch: -t '" + value + "' but this helper mounts 'gitfs'";
+              res.message = "fstype mismatch: -t '" + value + "' but this helper mounts 'gitmount'";
               return res;
             }
           }
@@ -400,4 +400,4 @@ ParseResult parse(int argc, char* const argvIn[]) {
   return res;
 }
 
-}  // namespace gitfs::cli
+}  // namespace gitmount::cli

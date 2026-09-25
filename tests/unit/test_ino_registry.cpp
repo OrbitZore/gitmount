@@ -1,4 +1,4 @@
-// gitfs unit tests — st_ino registry (RFC 0000 §3.2).
+// gitmount unit tests — st_ino registry (RFC 0000 §3.2).
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <catch2/catch_test_macros.hpp>
 
@@ -6,7 +6,7 @@
 
 #include "ino_registry.hpp"
 
-using gitfs::InoRegistry;
+using gitmount::InoRegistry;
 
 TEST_CASE("root is pinned to FUSE_ROOT_ID", "[ino]") {
   InoRegistry r;
@@ -17,7 +17,7 @@ TEST_CASE("root is pinned to FUSE_ROOT_ID", "[ino]") {
 TEST_CASE("default hash is deterministic across instances", "[ino]") {
   InoRegistry a, b;
   for (const char* p : {"/branch/main", "/tag/v1.0", "/HEAD/a/b.txt", "/commit/deadbeef",
-                        "/commits", "/.gitfs.json"}) {
+                        "/commits", "/.gitmount.json"}) {
     CHECK(a.register_path(p) == b.register_path(p));
   }
 }

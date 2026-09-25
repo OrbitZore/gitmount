@@ -5,8 +5,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        gitfs's observable semantics are pinned by
-        [RFC 0000](https://github.com/OrbitZore/gitfs/blob/main/rfc/0000-gitfs.md);
+        gitmount's observable semantics are pinned by
+        [RFC 0000](https://github.com/OrbitZore/gitmount/blob/main/rfc/0000-gitmount.md);
         v0.1 explicitly excludes write paths, network operations and sparse
         checkouts. Ideas that change pinned semantics may need an RFC
         amendment — describe the motivation thoroughly.

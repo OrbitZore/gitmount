@@ -1,10 +1,10 @@
-// gitfs unit tests — blob LRU (RFC 0000 §3.5).
+// gitmount unit tests — blob LRU (RFC 0000 §3.5).
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <catch2/catch_test_macros.hpp>
 
 #include "object_cache.hpp"
 
-using gitfs::BlobLruCache;
+using gitmount::BlobLruCache;
 
 TEST_CASE("miss then hit", "[lru]") {
   BlobLruCache c(1024);

@@ -1,10 +1,10 @@
-// gitfs unit tests — path_map state machine (RFC 0000 §5: 重点单测).
+// gitmount unit tests — path_map state machine (RFC 0000 §5: 重点单测).
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <catch2/catch_test_macros.hpp>
 
 #include "path_map.hpp"
 
-using namespace gitfs::pathmap;
+using namespace gitmount::pathmap;
 
 TEST_CASE("root and entry dirs parse", "[path_map]") {
   CHECK(parse("/").kind == Kind::Root);
@@ -38,9 +38,9 @@ TEST_CASE("HEAD paths", "[path_map]") {
 
 TEST_CASE("synthetic files", "[path_map]") {
   CHECK(parse("/commits").kind == Kind::CommitsFile);
-  CHECK(parse("/.gitfs.json").kind == Kind::MetaJson);
+  CHECK(parse("/.gitmount.json").kind == Kind::MetaJson);
   CHECK(parse("/commits/x").err == ENOTDIR);
-  CHECK(parse("/.gitfs.json/x").err == ENOTDIR);
+  CHECK(parse("/.gitmount.json/x").err == ENOTDIR);
 }
 
 TEST_CASE("unknown top-level entries are ENOENT", "[path_map]") {

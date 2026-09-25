@@ -1,15 +1,15 @@
-# RFC 0000 — gitfs：将 git 仓库挂载为只读 FUSE 文件系统
+# RFC 0000 — gitmount：将 git 仓库挂载为只读 FUSE 文件系统
 
 | 字段 | 值 |
 |---|---|
 | RFC | 0000 |
 | 类别 | 项目规范（内部 Standards Track） |
-| 标题 | gitfs — read-only git-to-FUSE 文件系统 |
+| 标题 | gitmount — read-only git-to-FUSE 文件系统 |
 | 状态 | Accepted（定稿，语义冻结） |
 | 日期 | 2026-09-24（评审通过）；2026-09-25（压缩定稿） |
 | 目标版本 | 0.1.0 |
 | 语言 | 简体中文；要求用语依 BCP 14 [BCP14]（§2.1） |
-| 讨论与勘误 | git 仓库提交历史（rfc/0000-gitfs.md 的 git log） |
+| 讨论与勘误 | git 仓库提交历史（rfc/0000-gitmount.md 的 git log） |
 | 版权 | 本文与项目代码同以 GPL-3.0-or-later 发布（§5 的 LICENSE） |
 
 **状态说明**：2026-09-24 评审通过（决议 Q1–Q7）及其后 Q8–Q26
@@ -24,14 +24,14 @@
 
 ## 摘要
 
-`mount.gitfs`（C++17，安装于 `$(sbindir)`，遵循 mount(8) 助手命名
+`mount.gitmount`（C++17，安装于 `$(sbindir)`，遵循 mount(8) 助手命名
 约定 `mount.<fstype>`）把一个本地 bare 或普通 git 仓库挂载为**只读**
-FUSE 文件系统。三种等价调用：`mount -t gitfs <repo> <dir>`、
-`/etc/fstab` 条目、直连 `mount.gitfs <repo> <dir>`。挂载点根目录
+FUSE 文件系统。三种等价调用：`mount -t gitmount <repo> <dir>`、
+`/etc/fstab` 条目、直连 `mount.gitmount <repo> <dir>`。挂载点根目录
 暴露（图 1）：
 
 ```
-/mnt/gitfs/
+/mnt/gitmount/
 ├── branch/      # 本地分支
 ├── tag/         # tag（annotated 与 lightweight）
 ├── commit/      # 任意 commit（仅按完整 oid 访问，不可枚举；
@@ -39,7 +39,7 @@ FUSE 文件系统。三种等价调用：`mount -t gitfs <repo> <dir>`、
 ├── remote/      # 远端跟踪分支 <remote>/<branch>
 ├── HEAD/        # 当前 HEAD 指向的快照
 ├── commits      # 只读文件：全部可达 commit 的完整 oid 清单
-└── .gitfs.json  # 挂载元信息
+└── .gitmount.json  # 挂载元信息
 ```
 
 每个 ref（git 的命名引用——分支、tag、远端跟踪分支或 HEAD）或
@@ -82,8 +82,8 @@ commit 解析为一个 commit 对象，
 
 1. 只读文件系统；所有写操作返回 `EROFS`，挂载参数强制 `ro`。
 2. 根目录暴露五个入口目录（`branch/`、`tag/`、`remote/`、
-   `commit/`、`HEAD/`）与 `commits`、`.gitfs.json` 两个合成文件
-   （gitfs 自行生成的固定名文件，见 §2.4）。
+   `commit/`、`HEAD/`）与 `commits`、`.gitmount.json` 两个合成文件
+   （gitmount 自行生成的固定名文件，见 §2.4）。
 3. 完整呈现 git tree：目录（`040000`）、普通文件（`100644`）、可
    执行文件（`100755`）、符号链接（`120000`）；子模块（`160000`）
    以空目录 + 说明文件占位。
@@ -91,7 +91,7 @@ commit 解析为一个 commit 对象，
 5. 单机 Linux（fuse3），C++17，依赖仅 libgit2（≥1.4）+ libfuse3
    （≥3.10），CI 矩阵验证。
 6. 完整开源工程配套：CMake、单测+集成测试、CI、文档、规范提交。
-7. 以 mount(8) 助手形态（§2.3）与系统集成：`mount -t gitfs` 与
+7. 以 mount(8) 助手形态（§2.3）与系统集成：`mount -t gitmount` 与
    fstab 条目可直接使用。
 
 ### 1.3 非目标（v0.1，未来另立 RFC）
@@ -161,8 +161,8 @@ commit 解析为一个 commit 对象，
 
 - **入口目录**：根下的 `/branch`、`/tag`、`/remote`、`/commit`、
   `/HEAD` 五个固定目录。
-- **合成文件 / 合成项**：gitfs 生成而非来自 git tree 的文件
-  （`commits`、`.gitfs.json`、`.gitfs-submodule`）及 readdir 中
+- **合成文件 / 合成项**：gitmount 生成而非来自 git tree 的文件
+  （`commits`、`.gitmount.json`、`.gitmount-submodule`）及 readdir 中
   对应的条目。
 - **分组前缀节点**：嵌套 ref 名（如 `feature/foo`）按首分量分组
   渲染时产生的合成命名空间目录（`/branch/feature`、`/tag/v1.0`、
@@ -299,8 +299,8 @@ commit 解析为一个 commit 对象，
   `foo.txt`（文件）这类组合上与纯字节序相反（`0x2E '.'` <
   `0x2F '/'`，git 序把 `foo.txt` 排在 `foo/` 之前）——换取整个
   挂载统一、可复现、不依赖 git 内部排序实现的枚举顺序；
-  `.gitfs-submodule` 合成项按其文件名参与同一排序；`.`/`..` 不由
-  gitfs 返回。集成测试直接断言字节序，或以 `LC_ALL=C sort` 归一
+  `.gitmount-submodule` 合成项按其文件名参与同一排序；`.`/`..` 不由
+  gitmount 返回。集成测试直接断言字节序，或以 `LC_ALL=C sort` 归一
   后与 `git ls-tree` 比对集合（§5）。
 - `/branch`、`/tag`、`/remote` 的 readdir 实时反映仓库外部更新
   （`/commit` 恒空，见上），新 commit、新 tag 无需重新挂载即可见；
@@ -308,11 +308,11 @@ commit 解析为一个 commit 对象，
 - **空仓库**（无任何 refs 且 unborn HEAD）：挂载照常成功——
   `/branch`、`/tag`、`/remote` 为空目录，`/HEAD` 访问 → ENOENT，
   `commits` 为空清单（`st_size=0`，open 生成空缓冲），
-  `.gitfs.json` 的 `head` 为 `null`（3.6）。
-- **挂载期间的外部 `git gc`/`git prune`**：gitfs 不加锁、不阻止
+  `.gitmount.json` 的 `head` 为 `null`（3.6）。
+- **挂载期间的外部 `git gc`/`git prune`**：gitmount 不加锁、不阻止
   任何外部 git 操作。若 gc 重写 pack 或 prune 删除了后续请求仍需
   要的对象，该请求瞬时返回 `ENOENT`（对象消失）或 `EIO`（pack
-  中途失效），gc 结束后即恢复；gitfs 不承诺挂载期内对象集不变
+  中途失效），gc 结束后即恢复；gitmount 不承诺挂载期内对象集不变
   （`commits` 清单生成期间命中同一口径，见 3.5）。运维建议：挂载
   期间禁用自动 gc（`git config gc.auto 0`）或接受上述瞬态错误
   （README 与 filesystem-semantics.md 中声明，见 §5）。
@@ -327,7 +327,7 @@ commit 解析为一个 commit 对象，
 | `100644` | `S_IFREG \| 0644` | 普通文件 |
 | `100755` | `S_IFREG \| 0755` | 可执行 |
 | `120000` | `S_IFLNK \| 0777` | 符号链接，readlink 返回 blob 内容 |
-| `160000` | `S_IFDIR \| 0755`（空目录）+ 说明文件 | 子模块：渲染为空目录，旁边放 `<name>.gitfs-submodule` 文本文件（`<name>` 即该子模块目录名，如 `deps/libfoo` → `deps/libfoo.gitfs-submodule`；内容含 url 与 commit oid）；若树中已存在与该合成文件名相同的真实条目，真实条目优先、省略合成文件（记警告日志） |
+| `160000` | `S_IFDIR \| 0755`（空目录）+ 说明文件 | 子模块：渲染为空目录，旁边放 `<name>.gitmount-submodule` 文本文件（`<name>` 即该子模块目录名，如 `deps/libfoo` → `deps/libfoo.gitmount-submodule`；内容含 url 与 commit oid）；若树中已存在与该合成文件名相同的真实条目，真实条目优先、省略合成文件（记警告日志） |
 
 - `st_size`：**普通 blob** 取原始字节数，一律经 **header-only 读取**
   获得、不触发 blob 全量解压——`getattr` 与 3.5 的超限准入判定同
@@ -355,8 +355,8 @@ commit 解析为一个 commit 对象，
   读取更新——只读快照语义，避免逐次 stat 漂移（主流发行版
   relatime 下内核本就不强制刷新 atime，用户无感知）。
 - `st_nlink`：目录为 2，文件为 1（简化，不做精确统计）。
-- `st_blocks = ceil(st_size/512)`（`commits`/`.gitfs.json`/
-  `.gitfs-submodule` 等合成文件同口径，按其内容字节数计——
+- `st_blocks = ceil(st_size/512)`（`commits`/`.gitmount.json`/
+  `.gitmount-submodule` 等合成文件同口径，按其内容字节数计——
   libfuse 不按 st_size 自动推导，缺省 0 会让 `du` 对全部文件报
   0 块）；`st_blksize = 4096`（与 statfs 汇报的块大小一致）；
   `st_rdev = 0`（任何 entry 均非设备节点）。
@@ -379,11 +379,11 @@ commit 解析为一个 commit 对象，
   级），README 与 filesystem-semantics.md 中声明（§5）。挂载
   基线因此含 `use_ino`（3.7）。
 - `st_uid`/`st_gid`：挂载进程的 uid/gid（fuse 默认行为）。
-- **合成文件与目录的元数据**：`commits` 与 `.gitfs.json` 为
+- **合成文件与目录的元数据**：`commits` 与 `.gitmount.json` 为
   `S_IFREG | 0444`、`nlink=1`（写路径本就 EROFS，`cp` 类工具按只
   读源处理）；根、五个入口目录与分组前缀节点均为 `S_IFDIR|0755`、
   `nlink=2`、`st_mtime/ctime/atime` = **挂载时刻**（入口集合虽实
-  时枚举，时间戳钉住挂载快照不漂移，与 `.gitfs.json` 同口径）；
+  时枚举，时间戳钉住挂载快照不漂移，与 `.gitmount.json` 同口径）；
   **目录 `st_size` 恒为 4096**（根、入口、分组与 tree 目录统一，
   合并节点经完整 ref 节点同归 tree 目录口径；与 `st_blksize` 同
   量级的目录尺寸惯例值）。`commits` 的 `st_mtime`：**生成前**
@@ -391,10 +391,10 @@ commit 解析为一个 commit 对象，
   stat 漂移），首次 open 后跳变为真实生成时刻（与 size 0→真实值
   同构）；指纹变化触发重建后，stat 报**当前缓存版本**的生成时刻
   ——正在钉住旧版本读的句柄可能看到比自己快照更新的 mtime，与
-  3.5"下一次 open 起可见新版本"口径一致。`.gitfs-submodule` 为
-  所属 commit 的 committer time（内容确定性派生自树）；`.gitfs.json`
+  3.5"下一次 open 起可见新版本"口径一致。`.gitmount-submodule` 为
+  所属 commit 的 committer time（内容确定性派生自树）；`.gitmount.json`
   为挂载时刻（3.6）。
-- **`.gitfs-submodule` 说明文件**：mode `0644`，内容为两行
+- **`.gitmount-submodule` 说明文件**：mode `0644`，内容为两行
   `key=value` 文本——`url=<submodule url>` 与 `commit=<完整 oid>`
   （各以 LF 结尾）；url 取自该 commit 树根 `.gitmodules` 中对应
   path 的条目，缺失或无对应条目时 `url=` 置空并记警告日志。
@@ -415,9 +415,9 @@ commit 解析为一个 commit 对象，
 | 操作 | 行为 |
 |---|---|
 | `getattr` | 路径 → 对象（3.1），失败 `ENOENT`；`commits` 恒为纯缓存读（未生成时 `st_size=0`），**不**触发 revwalk 或指纹重算（3.5）；**普通 blob** 的 `st_size` 经 header-only 读取获得，**不**触发 blob 全量解压（symlink 为显式例外——取截断长度须读内容定位首个 NUL，无 NUL 病理形态须全量扫描，见 3.2） |
-| `readdir` | 根：固定列表；`branch/tag/remote`：枚举 ref（含 `/` 的名字按目录分组）；`commit`：**恒为空**；tree：枚举 entries（含 `.gitfs-submodule` 合成项）；合并节点：root tree 条目 ∪ 子 ref 名的并集、同名按子 ref 折叠（3.1）——全部目录（含根，并集含其中）的输出顺序一律按分量原始字节字典序、子 ref 名与 tree 条目混排不分组（3.1）。注册 `opendir/releasedir`：枚举列表快照挂于 `fi->fh`，保证单目录流内 offset 续读稳定（fuse3 要求），跨目录流实时反映 ref 变化 |
-| `open`/`release` | 仅校验 `O_RDONLY` 系标志（写标志 → `EROFS`，与内核对 ro 挂载的判定一致）；`commits` 首次 `open` 触发生成（3.5），且把当前缓冲版本**钉住于 `fi->fh`**——同一次 open 的所有 read 分片读自同一快照，refs 中途变化不影响（与 readdir 的目录流快照同构），`release` 时解除钉住；超限 blob 的 `open` 同构 **open-pin**：一次性 lookup（单互斥内）+ 全量解压（锁外执行，不阻塞全挂载其他请求），解压块钉住于 `fi->fh`、`release` 释放（3.5）；`.gitfs.json` 挂载期内不可变，无需钉住 |
-| `read` | 定位 blob（可缓存者经 LRU 缓存；超限者读 open 时钉住的解压块，见 3.5），拷贝 `[offset, offset+size)` 越界截断；合成文件（`commits`、`.gitfs.json`、`.gitfs-submodule`）为整块只读缓冲，`commits` 读 open 时钉住的版本 |
+| `readdir` | 根：固定列表；`branch/tag/remote`：枚举 ref（含 `/` 的名字按目录分组）；`commit`：**恒为空**；tree：枚举 entries（含 `.gitmount-submodule` 合成项）；合并节点：root tree 条目 ∪ 子 ref 名的并集、同名按子 ref 折叠（3.1）——全部目录（含根，并集含其中）的输出顺序一律按分量原始字节字典序、子 ref 名与 tree 条目混排不分组（3.1）。注册 `opendir/releasedir`：枚举列表快照挂于 `fi->fh`，保证单目录流内 offset 续读稳定（fuse3 要求），跨目录流实时反映 ref 变化 |
+| `open`/`release` | 仅校验 `O_RDONLY` 系标志（写标志 → `EROFS`，与内核对 ro 挂载的判定一致）；`commits` 首次 `open` 触发生成（3.5），且把当前缓冲版本**钉住于 `fi->fh`**——同一次 open 的所有 read 分片读自同一快照，refs 中途变化不影响（与 readdir 的目录流快照同构），`release` 时解除钉住；超限 blob 的 `open` 同构 **open-pin**：一次性 lookup（单互斥内）+ 全量解压（锁外执行，不阻塞全挂载其他请求），解压块钉住于 `fi->fh`、`release` 释放（3.5）；`.gitmount.json` 挂载期内不可变，无需钉住 |
+| `read` | 定位 blob（可缓存者经 LRU 缓存；超限者读 open 时钉住的解压块，见 3.5），拷贝 `[offset, offset+size)` 越界截断；合成文件（`commits`、`.gitmount.json`、`.gitmount-submodule`）为整块只读缓冲，`commits` 读 open 时钉住的版本 |
 | `readlink` | symlink blob 内容；内容含嵌入 NUL 时**截断至首个 NUL**（内核 symlink 目标不可含 NUL；与 `git checkout` 的事实行为一致，显式同语义而非 `EIO`）；截断口径与 `st_size` 对齐——symlink 的 stat 尺寸即截断后长度（3.2）；空 blob → 返回长度 0 的空目标；**截断后长度 ≥ PATH_MAX → `ENAMETOOLONG`**（内核接受的目标长度上限为 PATH_MAX−1、恰等于 PATH_MAX 即失败——含 NUL 与否同判；此病理形态下 st_size 仍按截断口径报长度，"stat 尺寸 = readlink 字节数"不变式显式失效，见 3.2） |
 | `statfs` | 汇报本地 ODB 占用为 `f_blocks`（全部 packfile 字节 + loose 对象字节；alternates 指向的外部存储不计入，启用 alternates 时 verbose 日志提示），块大小 4KiB；`f_bfree = f_bavail = 0`——只读卷惯例是 0 空闲，`df` 显示 100% 已用，向用户明确传达"无任何可写空间"（若报全量可用，`df` 会显示 0% 已用，易误导）；`f_files = f_ffree = 0`（精确 inode 计数需全量遍历，v0.1 不承诺，内核与 `df` 均容忍 0） |
 | 其余（`mknod/mkdir/write/…`） | 返回 `EROFS` 或不注册（fuse3 只读挂载兜底）；**xattr 族**（get/set/list/remove）一律不注册 → libfuse 缺省 `ENOSYS`，内核标记"无 xattr"后统一向用户态报 `ENOTSUP`（SELinux 等环境的 `security.*`/statx 附加字段查询命中此路径，干净短路而非逐次回环） |
@@ -573,7 +573,7 @@ commit 解析为一个 commit 对象，
 
 ### 3.6 根目录元信息
 
-根目录额外暴露一个只读文件 `.gitfs.json`（名字以 `.` 开头，避免与
+根目录额外暴露一个只读文件 `.gitmount.json`（名字以 `.` 开头，避免与
 入口目录语义混淆；根目录不呈现仓库树、合成文件均为固定名，无命名
 冲突；内容示例见图 2）：
 
@@ -596,7 +596,7 @@ commit 解析为一个 commit 对象，
   JSON 合法、不承诺可逆**——路径中本就存在的字面 `%XX`（ASCII
   百分号 + 两位十六进制）与转义产物在输出中不可区分，探测脚本不
   得据此逆推原始路径字节（需精确路径请用挂载参数或系统侧信息）。
-- **失效语义（显式声明）**：`.gitfs.json` 是**挂载时刻的快照**，
+- **失效语义（显式声明）**：`.gitmount.json` 是**挂载时刻的快照**，
   挂载期间不可变——`head` 字段在挂载后分支切换/HEAD 移动时**不**
   跟随更新（需探测实时 HEAD 请进入 `HEAD/` 目录或直接
   `git rev-parse`）；不参与 refs 指纹失效机制，重新挂载即刷新。
@@ -604,12 +604,12 @@ commit 解析为一个 commit 对象，
 ### 3.7 CLI 与退出码
 
 程序以 **mount(8) 助手** 形态发布：可执行文件安装为
-`$(sbindir)/mount.gitfs`，三种调用形态等价：
+`$(sbindir)/mount.gitmount`，三种调用形态等价：
 
 ```
-mount -t gitfs <repo> <mountpoint> [-o <opts>]   # 经 mount(8) exec 助手
+mount -t gitmount <repo> <mountpoint> [-o <opts>]  # mount(8) exec 助手
 mount <mountpoint>                                # /etc/fstab 条目触发
-mount.gitfs <repo> <mountpoint> [选项]            # 直连调用
+mount.gitmount <repo> <mountpoint> [选项]            # 直连调用
 ```
 
 **mount(8) 实际转交行为**（经 util-linux 2.42.3 libmount 源码
@@ -622,7 +622,7 @@ exec 助手时：
 verbose）、`--namespace` 转交为 `-N <ns>`、`-o` 选项串；`-r`/`-w`
 **从不以标志形式转交**，而是并入 `-o` 串（`-r` → 追加 `ro`、
 `-w` → 追加 `rw`）；且对未显式只读的调用，libmount **无条件在
-`-o` 串中预置 `rw`**——裸调用 `mount -t gitfs <repo> <dir>` 实际
+`-o` 串中预置 `rw`**——裸调用 `mount -t gitmount <repo> <dir>` 实际
 到达助手的 argv 为 `<repo> <dir> -o rw`，且选项恒出现在位置参数
 **之后**（实测如 `<src> <dir> -f -o rw`），参数解析须容忍选项后
 置（GNU getopt 式置换，否则主路径直接破）。`-o` 串内的 rw/ro 冲
@@ -632,12 +632,12 @@ CLI `-o rw` 的覆盖流同样在 libmount 层裁决为单个到达键、到达�
 为无操作（`rw` 记警告），挂载恒为 ro（硬编码基线），实现者无须
 为该组合写特殊解析（直连调用纵然出现 rw,ro 同串，两键亦各自为无
 操作）。util-linux ≥2.35 还允许 CLI `-o` 在 fstab 选项之上增改。
-**`-t` 子句**：带点 fstype（`mount -t gitfs.<x>`）由 libmount 以
+**`-t` 子句**：带点 fstype（`mount -t gitmount.<x>`）由 libmount 以
 `-t <type.subtype>` 整值转交（实测带点 fstype 的助手 argv 确为
-`<src> <dir> -o rw -t <type.subtype>`，无点则恒不出现）；`gitfs`
+`<src> <dir> -o rw -t <type.subtype>`，无点则恒不出现）；`gitmount`
 无点、经 mount(8) 的路径永不收到该子句，但契约核验口径为穷尽，
-故钉住处理：收到 `-t gitfs`（仅可能经直连调用出现）接受并记
-verbose 一条（冗余自指），**其余任何值**（含 `gitfs.<x>` 带点形
+故钉住处理：收到 `-t gitmount`（仅可能经直连调用出现）接受并记
+verbose 一条（冗余自指），**其余任何值**（含 `gitmount.<x>` 带点形
 态）为 fstype 错配、参数错误退出 1。`-n`/`-s`/`-N` 容忍并忽略
 （`-s` 仅标志本身被容忍、不放松未知 `-o` 键拒绝——mount(8) 文档
 语义为"忽略文件系统不支持的挂载选项"，但静默吞掉拼写错误的自有
@@ -646,7 +646,7 @@ verbose 一条（冗余自指），**其余任何值**（含 `gitfs.<x>` 带点�
 
 **`-o` 串中 VFS 键的实际到达口径**：libmount 仅滤除固定子集
 （`auto/noauto/comment=/x-*/loop/offset=/sizelimit=/defaults` 及
-传播键），其余 VFS 键原样到达。实测到达且对 gitfs 无操作的键
+传播键），其余 VFS 键原样到达。实测到达且对 gitmount 无操作的键
 （**枚举名单**，util-linux 2.42.3 快照）：atime/noatime/relatime/
 strictatime/lazytime/diratime/nodiratime、sync/async/dirsync、
 exec/noexec、user/users/owner/group/nouser、symfollow/
@@ -673,11 +673,11 @@ mount(8) "Filesystem-independent mount options" 表内（实测
    条；
 3. **表轨兜底**——仅认 man mount(8)
    "Filesystem-independent mount options" 一节**所列**的键：所列
-   且对 gitfs 为无操作者（ro 基线、atime≡mtime、无属主映射语义
+   且对 gitmount 为无操作者（ro 基线、atime≡mtime、无属主映射语义
    下无效果；表内否定键 `noiversion`/`norelatime`/
    `nostrictatime`/`nolazytime` 与带值形态（`noexec=recursive`
    等）正是由本轨经截 = 取键名吸收——枚举名单未逐一收录它们）
-   → 接受并忽略、verbose 记一条；该表中对 gitfs 有语义或安全影
+   → 接受并忽略、verbose 记一条；该表中对 gitmount 有语义或安全影
    响者（`suid`/`dev`、`remount`、`uid=`/`gid=`/`umask=`、
    `context=`/`fscontext=`/`defcontext=`/`rootcontext=`（SELinux 标签
    键，值含冒号、实测整值到达））→ 专用错误退出 1（v0.1 无 remount/
@@ -694,23 +694,23 @@ mount(8) "Filesystem-independent mount options" 表内（实测
 无操作并记 stderr 警告（ro 为硬编码基线、安全不被稀释，ntfs-3g
 同先例 [NTFS3G]）；`suid`/`dev` 维持报错退出 1（实测确实
 到达，规范可测）。
-到达的无关 VFS 键接受并忽略使 `mount -t gitfs -o
+到达的无关 VFS 键接受并忽略使 `mount -t gitmount -o
 noatime,nodiratime repo dir` 这类常见习惯、fstab 的 `user`（非
 root 挂载）与 boot 常见的 `nofail`/`_netdev` 均不因未知键失败。
 **演进条款**：枚举名单是实测快照、对表内键不宣称穷尽（表轨兜
 底）；未来 util-linux 版本使新的表外键到达 `-o` 串时（如 2.41+
-的 `symfollow`），按"是否对 gitfs 无操作"人工分诊入枚举名单，并
+的 `symfollow`），按"是否对 gitmount 无操作"人工分诊入枚举名单，并
 写入维护核对单 `docs/maintenance-checklist.md`（新 util-linux 发布
 → diff man 表与 libmount 转发键集 → 分诊 → 更新枚举名单与 §5
 用例），而非因枚举缺漏落入 libfuse 拒绝。
 
 ```
-用法: mount.gitfs [选项] <repository> <mountpoint>
+用法: mount.gitmount [选项] <repository> <mountpoint>
       （选项可出现在位置参数之后——mount(8) exec 助手实测 argv 为
         <repo> <dir> -f -o rw，解析须容忍 GNU getopt 式选项置换）
 
 选项:
-  -o OPT[,OPT…]       键值/开关形态。gitfs 自有键
+  -o OPT[,OPT…]       键值/开关形态。gitmount 自有键
                        blob-cache-size=<MiB>、tree-cache-size=<MiB>（连
                        字符与下划线拼法等价），与同名长选项语义、校验完
                        全一致；同一键重复给出取"后者胜"（出现序：
@@ -723,10 +723,10 @@ root 挂载）与 boot 常见的 `nofail`/`_netdev` 均不因未知键失败。
                        单见上；user 族附带键实测口径见上）；`fsname=` 允
                        许透传覆盖基线（cosmetic，仅影响展示名），
                        `subtype=` 覆盖基线 → 参数错误退出 1（基线保
-                       护——/proc/mounts 的 type 字段与 mount -t gitfs/
-                       findmnt -t gitfs 的匹配依赖它，ro/nosuid/nodev/
-                       default_permissions/use_ino 同列保护）；其余键原
-                       样透传 libfuse 选项解析器（如 kernel_cache；
+                       护——/proc/mounts 的 type 字段与 mount -t
+                       gitmount/findmnt -t gitmount 的匹配依赖它，
+                       ro/nosuid/nodev/default_permissions/use_ino 同列
+                       保护）；其余键原样透传 libfuse 选项解析器（如 kernel_cache；
                        allow_other 需 /etc/fuse.conf 启用
                        user_allow_other），未知键由 libfuse 拒绝 →
                        退出 1
@@ -755,8 +755,8 @@ root 挂载）与 boot 常见的 `nofail`/`_netdev` 均不因未知键失败。
   --version / --help
 ```
 
-- 挂载选项硬编码基线：`ro,fsname=gitfs,default_permissions,
-  subtype=gitfs,nosuid,nodev,use_ino`（`use_ino` 令内核采用 gitfs
+- 挂载选项硬编码基线：`ro,fsname=gitmount,default_permissions,
+  subtype=gitmount,nosuid,nodev,use_ino`（`use_ino` 令内核采用 gitmount
   填充的路径派生 `st_ino`，见 3.2）。
 - 卸载：`umount <mountpoint>`（或 `fusermount3 -u`）；守护进程收到
   `SIGINT`/`SIGTERM` 亦优雅退出（见 3.4）。
@@ -768,7 +768,7 @@ root 挂载）与 boot 常见的 `nofail`/`_netdev` 均不因未知键失败。
 
 ## 4. 安全考虑
 
-威胁模型概览：gitfs 为只读、内容寻址的数据面——不访问网络、无
+威胁模型概览：gitmount 为只读、内容寻址的数据面——不访问网络、无
 写路径；安全风险集中于（a）不受信仓库内容（symlink 目标、绕过
 fsck 的病态对象、超长名）与（b）挂载期间的仓库外部操作（外部
 gc/prune、手改 refs）。逐项对策：
@@ -786,9 +786,9 @@ gc/prune、手改 refs）。逐项对策：
 ## 5. 工程结构（开源最佳实践）
 
 ```
-gitfs/
+gitmount/
 ├── CMakeLists.txt               # >= 3.16，C++17，-Wall -Wextra -Wpedantic
-│                                # -Werror(CI)；install: $(sbindir)/mount.gitfs
+│                                # -Werror(CI)；install: $(sbindir)/mount.gitmount
 │                                # + $(mandir)/man8
 ├── LICENSE                      # GPL-3.0-or-later（SPDX 标注同左）
 ├── README.md                    # 快速开始、语义声明（/commits 首次 open 的
@@ -804,7 +804,7 @@ gitfs/
 ├── rfc/                         # 本目录：设计文档先行
 ├── src/
 │   ├── main.cpp                 # CLI/mount(8) 助手参数解析、fuse 启动
-│   ├── gitfs.hpp/.cpp           # fuse_ops 实现（路径解析、VFS 语义）
+│   ├── gitmount.hpp/.cpp        # fuse_ops 实现（路径解析、VFS 语义）
 │   ├── gitrepo.hpp/.cpp         # libgit2 RAII 封装（ref 解析、tree 下行）
 │   ├── object_cache.hpp         # blob LRU（单测覆盖）
 │   ├── path_map.hpp/.cpp        # "/branch/x/y" → 解析状态机（纯函数，重点单测）
@@ -827,9 +827,9 @@ gitfs/
     │                            # （新 util-linux 发布 → diff mount(8)
     │                            # "Filesystem-independent mount
     │                            # options" 表与 libmount 转发键集 →
-    │                            # 按"是否对 gitfs 无操作"分诊 → 更新
-    │                            # 枚举名单与本文用例）
-    └── mount.gitfs.8            # man 手册（roff；install 到 man8）
+    │                            # 按"是否对 gitmount 无操作"分诊 →
+    │                            # 更新枚举名单与本文用例）
+    └── mount.gitmount.8        # man 手册（roff；install 到 man8）
 ```
 
 - **提交规范**：Conventional Commits [CONVCOMMITS]
@@ -845,7 +845,7 @@ gitfs/
   symlink blob——后两者 readlink 报 `ENAMETOOLONG` 而 st_size 分别
   报全长与截断长度（例外谓词两形态均可分辨）。
 - **大 blob 置于仅含普通 blob 的专用目录**——不含 symlink 与
-  `.gitfs-submodule` 合成项，即满足零解压断言的目录限定语，断言以
+  `.gitmount-submodule` 合成项，即满足零解压断言的目录限定语，断言以
   它为遍历对象。
 - 用 mktree/hash-object -w 手工构造含 `.` 与 `..` entry 的非法
   tree（绕过 fsck），供 readdir 跳过断言。
@@ -869,7 +869,7 @@ gitfs/
   言）。
 
 **集成断言要点**（oracle 一律 `git --no-replace-objects ls-tree`/
-`git cat-file`——与 gitfs 同为 replace 不生效语义）：
+`git cat-file`——与 gitmount 同为 replace 不生效语义）：
 
 - 内容一致性；"挂载后新增 tag 立即可见"。
 - 边缘：`.`/`..` entry 在 readdir/getattr 被跳过且记警告；
@@ -905,9 +905,9 @@ gitfs/
   法排除多次解压的盲区）；另以"整读耗时不随分片数平方增长"的宽
   松比值断言在自管 runner 上作参考检查。
 - **零解压断言**：`-v` 挂载下对大 blob 专用目录做 `ls -l`（getattr
-  全遍历；断言限定**不含 symlink 与 `.gitfs-submodule` 合成项（子
+  全遍历；断言限定**不含 symlink 与 `.gitmount-submodule` 合成项（子
   模块条目）的目录**——symlink 条目按 3.2 须读内容定位 NUL（病理
-  形态须全量扫描）、`.gitfs-submodule` 条目的内容与 `st_size` 须
+  形态须全量扫描）、`.gitmount-submodule` 条目的内容与 `st_size` 须
   读 commit 树根 `.gitmodules` blob 且新挂载下缓存 miss 装载解压
   同记一条日志，含任一者的目录合法触发解压、不在断言范围），verbose
   日志不出现任何解压事件（普通 blob 尺寸经 header-only 读取，与
@@ -915,14 +915,14 @@ gitfs/
 - 锁外解压可选参考断言（自管 runner、宽松阈值）：超限 blob open
   解压期间并发的根 readdir 不被长时间阻塞；大容量
   `--blob-cache-size` 挂载下首次读大可缓存 blob 期间同。
-- **mount(8) exec 路径九场景**（经真实 `mount -t gitfs`，需
+- **mount(8) exec 路径九场景**（经真实 `mount -t gitmount`，需
   util-linux ≥2.35 与特权环境，CI 无特权时 skip 标记）：(1) 默认
   调用（不带 -o ro）——libmount 预置的 `-o rw` 到达助手，断言被接
   受（stderr 记警告）且挂载成功、卸载干净；(2) `mount --fake`——
   转交的 `-f` 走 fake 语义：参数、选项与仓库可读性完整校验通过
   （另以坏仓库断言 `-f` 退出 2）、mountpoint 未被挂载、退出 0；
   (3) fstab `blob-cache-size=128` + CLI `-o blob-cache-size=256`
-  合并调用——自有键后者胜（挂载后读 `.gitfs.json` 的
+  合并调用——自有键后者胜（挂载后读 `.gitmount.json` 的
   `cache.blob_bytes` = 256×1024²）；(4) `-o noatime`——到达被接受
   并忽略（verbose 记一条）且挂载成功；(5) fstab 含 `user` 的条目
   以非 root 用户 `mount <dir>` 触发——`user` 及其隐式附带的
@@ -953,7 +953,7 @@ gitfs/
 
 1. **M1**：`/branch/<name>` 只读浏览 + 单测——端到端可演示。
 2. **M2**：`/tag`、`/commit`、`/remote`、`/HEAD`、`commits` 清单、
-   错误映射、statfs、`.gitfs.json`。
+   错误映射、statfs、`.gitmount.json`。
 3. **M3**：blob LRU、性能基准、集成测试矩阵、CI 完整化。
 4. **M4**：文档定稿、0.1.0 发布（首个 SemVer tag）。
 
@@ -1004,13 +1004,13 @@ gitfs/
 | 决议 | 终局口径（锚点） |
 |---|---|
 | Q1/Q2 | `/commit/<oid>` 仅完整 oid、不支持短前缀；`/commit` readdir 恒空，检索走 `commits` 清单（3.1） |
-| Q3 | 子模块渲染为空目录 + `.gitfs-submodule` 说明文件（3.2） |
+| Q3 | 子模块渲染为空目录 + `.gitmount-submodule` 说明文件（3.2） |
 | Q4 | v0.1 即含 `/remote/<remote>/<branch>` 与 `/HEAD`（3.1） |
 | Q5 | GPL-3.0-or-later（§5） |
 | Q6 | clang-format Google 风格（§5） |
 | Q7 | 单互斥串行化 libgit2；revwalk 分 chunk 让锁；M3 基准不达标再引入按 oid 分片锁（3.4） |
 | Q8 | `refs/replace` 不遵循、透传原始对象（3.1） |
-| Q9 | `st_atime`≡`st_mtime`；`.gitfs-submodule` mode 0644、mtime=committer time、内容 url=/commit= 两行；unborn HEAD 时 `head` 为 null（3.2/3.6） |
+| Q9 | `st_atime`≡`st_mtime`；`.gitmount-submodule` mode 0644、mtime=committer time、内容 url=/commit= 两行；unborn HEAD 时 `head` 为 null（3.2/3.6） |
 | Q10 | statfs `f_blocks`=本地 ODB 占用；`-o` 键处置经多轮演进为 3.7 双轨分诊（现行拒绝名单 `suid/dev`）（3.3/3.7） |
 | Q11 | libgit2 per-type 上限：tree 抬 1MiB、blob 写死 0；总预算即 `--tree-cache-size`（3.5） |
 | Q12 | gc/prune 瞬态语义与空仓库行为显式声明；缓存参数校验（正整数、非法 → 退出 1）（3.1/3.7） |
@@ -1027,7 +1027,7 @@ gitfs/
 | Q23 | 名单补全并钉"截首个 = 取键名"；`context=` 族专用错误；`-s` 不放松键拒绝；`-f` 含仓库校验（坏仓库 → 2）；user 族附带键实测口径（3.7） |
 | Q24 | 分诊改双轨锚点（枚举优先 + 表轨兜底）并加演进条款；`-o rw,ro` 折叠钉住（3.7） |
 | Q25 | `acl`/`quiet`/`showexec`/`bsdgroups` 为表外转发键、改入枚举轨，表轨限定仅认表内所列；维护核对单落点 `docs/maintenance-checklist.md`；直连滤除键不对称声明；带值 ro/rw 形态注记（3.7/§5） |
-| Q26 | 助手契约 `-t` 子句（`-t gitfs` 接受、其余退出 1）；分组前缀节点元数据=挂载时刻；仅含隐藏 HEAD 的命名空间渲染空目录；目录 `st_size`=4096 与超限边界 `>=`（3.7/3.2/3.1/3.5） |
+| Q26 | 助手契约 `-t` 子句（`-t gitmount` 接受、其余退出 1）；分组前缀节点元数据=挂载时刻；仅含隐藏 HEAD 的命名空间渲染空目录；目录 `st_size`=4096 与超限边界 `>=`（3.7/3.2/3.1/3.5） |
 | Q27 | symlink `st_size`=截断长度（与 readlink 对齐）；非符号远端 HEAD 按普通跟踪 ref；packed-refs 破坏 D/F 取最长 ref 名匹配回退 + 折叠警告（3.2/3.1） |
 | Q28 | 合并节点 readdir=tree 条目 ∪ 子 ref 名并集、同名折叠、形状失配以查找口径为准；截断后长度 ≥ PATH_MAX 的手工 symlink blob 为不变式显式例外（3.1/3.2） |
 | Q29 | 并集输出同按分量原始字节字典序、混排不分组；裸命名空间 ref 本体不可达为声明性行为、commits 仍纳入（3.1/3.5） |
@@ -1037,7 +1037,7 @@ gitfs/
 | Q33 | fixture 并集增 `zz`、钉 `bar` 为 blob——并集构成与折叠类型两形态可分辨；折叠歧义与形状失配两类警告补断言（§5） |
 | Q34 | fixture 增 `aa` 与 `foo/ab`——混排序 [aa,ab,bar,zz] 与任一分组序可分辨（§5） |
 | Q35 | 3.3 getattr 行主语改"普通 blob"并内联 symlink 例外；零解压断言限定不含 symlink 的目录；例外谓词拓宽为"截断后长度 ≥ PATH_MAX（无论是否含 NUL）"、ENAMETOOLONG 边界钉 `>=`；多分量子 ref 按首分量入列；折叠措辞点名两场景避免与分组前缀节点撞名（3.3/3.2/§5/3.1） |
-| Q36 | 零解压断言限定语补排除 `.gitfs-submodule` 合成项（双排除封闭）；man File metadata 措辞与例外形态对齐（§5） |
+| Q36 | 零解压断言限定语补排除 `.gitmount-submodule` 合成项（双排除封闭）；man File metadata 措辞与例外形态对齐（§5） |
 | Q37 | `.gitmodules` 读取按普通 blob 走 LRU（LRU 即备忘层；病态超限走绕过分支逐次解压各记日志）；fixture 钉大 blob 专用目录满足断言限定（3.2/§5） |
 | Q38 | fixture 注释自引章节号改"本文"（纯措辞，§5） |
 | Q39 | 同款自引第二实例与计数口径措辞收尾（纯措辞，过程记录见 git 历史） |

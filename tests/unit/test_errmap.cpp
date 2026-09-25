@@ -1,4 +1,4 @@
-// gitfs unit tests — git_to_errno (RFC 0000 §3.3).
+// gitmount unit tests — git_to_errno (RFC 0000 §3.3).
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <catch2/catch_test_macros.hpp>
 
@@ -8,7 +8,7 @@
 
 #include <git2.h>
 
-using gitfs::git_to_errno;
+using gitmount::git_to_errno;
 
 TEST_CASE("success maps to zero", "[errmap]") {
   CHECK(git_to_errno(0) == 0);

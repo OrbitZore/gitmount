@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gitfs — fixture repository generator (RFC 0000 §5).
+# gitmount — fixture repository generator (RFC 0000 §5).
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Builds the pinned fixture repo covering every integration assertion:
@@ -23,8 +23,8 @@ set -euo pipefail
 DEST=${1:?usage: make_repo.sh <target-dir>}
 if [ -e "$DEST" ]; then echo "refusing to overwrite $DEST" >&2; exit 1; fi
 
-export GIT_AUTHOR_NAME=gitfs GIT_AUTHOR_EMAIL=gitfs@example.com
-export GIT_COMMITTER_NAME=gitfs GIT_COMMITTER_EMAIL=gitfs@example.com
+export GIT_AUTHOR_NAME=gitmount GIT_AUTHOR_EMAIL=gitmount@example.com
+export GIT_COMMITTER_NAME=gitmount GIT_COMMITTER_EMAIL=gitmount@example.com
 export GIT_AUTHOR_DATE="2005-04-07T22:13:13 +0000"
 export GIT_COMMITTER_DATE="2005-04-07T22:13:13 +0000"
 
@@ -46,7 +46,7 @@ git init -q -b main "$DEST"
 cd "$DEST"
 
 mkdir -p src docs sub
-printf 'hello gitfs\n' > README.md
+printf 'hello gitmount\n' > README.md
 printf 'hello world\n' > src/hello.txt
 printf '#!/bin/sh\necho run\n' > src/run.sh
 chmod 755 src/run.sh
@@ -148,7 +148,7 @@ git update-ref refs/remotes/legacy "$C2"             # bare namespace ref
 git update-ref refs/notes/keep "$C1"
 git update-ref refs/stash "$C2"
 
-# refs/replace: gitfs never follows replacements (RFC 0000 §3.1).
+# refs/replace: gitmount never follows replacements (RFC 0000 §3.1).
 R1_TREE=$(printf '100644 blob %s\twhich.txt\n' "$(printf 'original R1\n' | mkblob)" | git mktree)
 R1=$(git commit-tree "$R1_TREE" -p "$C1" -m "R1 original")
 R2_TREE=$(printf '100644 blob %s\twhich.txt\n' "$(printf 'REPLACEMENT R2\n' | mkblob)" | git mktree)

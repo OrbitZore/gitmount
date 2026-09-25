@@ -1,4 +1,4 @@
-# gitfs release pipeline — RFC 0000 §5: 打 tag 出 release，CI 产出各发行版
+# gitmount release pipeline — RFC 0000 §5: 打 tag 出 release，CI 产出各发行版
 # 二进制 + SBOM。
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
@@ -53,8 +53,8 @@ jobs:
         run: >
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
-          -DGITFS_WERROR=ON
-          -DGITFS_USE_SYSTEM_LIBGIT2=OFF
+          -DGITMOUNT_WERROR=ON
+          -DGITMOUNT_USE_SYSTEM_LIBGIT2=OFF
 
       - name: Build
         run: cmake --build build
@@ -65,10 +65,10 @@ jobs:
       - name: Package
         run: |
           set -eu
-          PKG="gitfs-${VERSION}-${{ matrix.label }}"
+          PKG="gitmount-${VERSION}-${{ matrix.label }}"
           mkdir -p dist
           cmake --install build --strip --prefix "$PKG"
-          gzip -9n "$PKG/share/man/man8/mount.gitfs.8"
+          gzip -9n "$PKG/share/man/man8/mount.gitmount.8"
           cp LICENSE README.md README.zh-CN.md "$PKG/"
           mkdir -p "$PKG/docs"
           cp docs/filesystem-semantics.md docs/maintenance-checklist.md "$PKG/docs/"

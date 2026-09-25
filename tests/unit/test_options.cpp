@@ -1,16 +1,16 @@
-// gitfs unit tests — CLI / mount(8) helper option parsing (RFC 0000 §3.7).
+// gitmount unit tests — CLI / mount(8) helper option parsing (RFC 0000 §3.7).
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <catch2/catch_test_macros.hpp>
 
 #include "options.hpp"
 
-using namespace gitfs::cli;
+using namespace gitmount::cli;
 
 namespace {
 
 ParseResult run(std::vector<std::string> args) {
   std::vector<char*> argv;
-  argv.push_back(const_cast<char*>("mount.gitfs"));
+  argv.push_back(const_cast<char*>("mount.gitmount"));
   for (auto& a : args) argv.push_back(const_cast<char*>(a.data()));
   return parse(static_cast<int>(argv.size()), argv.data());
 }
@@ -151,9 +151,9 @@ TEST_CASE("comma splitting keeps colon-bearing values whole", "[options]") {
   CHECK(r.options.fuse_passthrough[0] == "x-foo=a:b");
 }
 
-TEST_CASE("-t gitfs accepted; anything else is a fstype mismatch", "[options]") {
-  CHECK(run({"/repo", "/mnt", "-t", "gitfs"}).action == Action::Run);
-  auto r = run({"/repo", "/mnt", "-t", "gitfs.custom"});
+TEST_CASE("-t gitmount accepted; anything else is a fstype mismatch", "[options]") {
+  CHECK(run({"/repo", "/mnt", "-t", "gitmount"}).action == Action::Run);
+  auto r = run({"/repo", "/mnt", "-t", "gitmount.custom"});
   REQUIRE(r.action == Action::Fail);
   CHECK(r.exit_code == 1);
 }

@@ -1,7 +1,7 @@
-# gitfs filesystem semantics
+# gitmount filesystem semantics
 
 This document is the stabilized, user-facing version of the design
-document's §3 ([rfc/0000-gitfs.md](../rfc/0000-gitfs.md), normative). When
+document's §3 ([rfc/0000-gitmount.md](../rfc/0000-gitmount.md), normative). When
 this document and the RFC disagree, the RFC wins; file an issue.
 
 ## 1. Path mapping
@@ -16,7 +16,7 @@ The mount root exposes five entry directories and two synthetic files:
 | `/remote/<remote>/<branch>` | remote-tracking refs; the remote name is split at the first component, the rest is the branch path |
 | `/HEAD` | current HEAD's snapshot; unborn HEAD (empty repository) is `ENOENT` |
 | `/commits` | newline-separated oids of every commit reachable from all refs plus HEAD |
-| `/.gitfs.json` | mount-time metadata snapshot (immutable for the mount) |
+| `/.gitmount.json` | mount-time metadata snapshot (immutable for the mount) |
 
 Rules worth memorizing:
 
@@ -42,7 +42,7 @@ Rules worth memorizing:
   `commits` list (their targets enter the walk).
 - **Empty repository:** the mount succeeds; `/branch`, `/tag`, `/remote`
   are empty directories, `/HEAD` is `ENOENT`, `commits` is empty, and
-  `.gitfs.json` reports `head: null`.
+  `.gitmount.json` reports `head: null`.
 - **Live updates:** entry directories enumerate the refdb on every
   `opendir`; new branches/tags/remotes appear without remounting. Already
   resolved objects stay accessible while they exist in the ODB.
@@ -68,7 +68,7 @@ tree ordering (which sorts directories as if suffixed with `/`), so
 | `100644` (blob) | `S_IFREG \| 0644` |
 | `100755` (blob) | `S_IFREG \| 0755` |
 | `120000` (symlink) | `S_IFLNK \| 0777` |
-| `160000` (submodule) | empty directory `0755` plus a sibling `<name>.gitfs-submodule` file |
+| `160000` (submodule) | empty directory `0755` plus a sibling `<name>.gitmount-submodule` file |
 
 - **Times:** file/tree timestamps are the owning commit's **committer
   time**; atime equals mtime (read-only snapshot semantics). The root,
@@ -108,7 +108,7 @@ tree ordering (which sorts directories as if suffixed with `/`), so
 
 ## 5. gc / prune during a mount
 
-gitfs takes no locks and never blocks external git operations. If an
+gitmount takes no locks and never blocks external git operations. If an
 external `git gc` / `git prune` / `git update-ref` runs while mounted:
 
 - Ref updates are picked up by the next enumeration (see live updates).
@@ -149,4 +149,4 @@ All write syscalls (`mknod`, `mkdir`, `unlink`, `rmdir`, `symlink`,
 `rename`, `link`, `chmod`, `chown`, `truncate`, `utimens`, `create`,
 `write`) return `EROFS`; xattr operations are not implemented
 (`ENOTSUP`); the mount baseline is `ro,nosuid,nodev,default_permissions`
-with the FUSE subtype `gitfs`.
+with the FUSE subtype `gitmount`.

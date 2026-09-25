@@ -1,4 +1,4 @@
-// gitfs — read-only git-to-FUSE filesystem (RFC 0000).
+// gitmount — read-only git-to-FUSE filesystem (RFC 0000).
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "gitrepo.hpp"
 
@@ -10,7 +10,7 @@
 
 namespace fs = std::filesystem;
 
-namespace gitfs {
+namespace gitmount {
 
 // ---------------------------------------------------------------------------
 // libgit2 process-wide state
@@ -23,7 +23,7 @@ void libgit2_global_shutdown() { git_libgit2_shutdown(); }
 void libgit2_configure_cache(std::uint64_t tree_cache_bytes) {
   // RFC 0000 §3.5: raise the tree per-type limit (default 4 KiB starves
   // serialized trees), raise COMMIT alongside (defensive, no cost), pin
-  // BLOB to 0 so libgit2 never caches blob bytes that gitfs's own LRU
+  // BLOB to 0 so libgit2 never caches blob bytes that gitmount's own LRU
   // already accounts for, and set the total budget to the user's value.
   git_libgit2_opts(GIT_OPT_SET_CACHE_OBJECT_LIMIT, GIT_OBJECT_TREE, static_cast<size_t>(1) << 20);
   git_libgit2_opts(GIT_OPT_SET_CACHE_OBJECT_LIMIT, GIT_OBJECT_COMMIT, static_cast<size_t>(1) << 20);
@@ -426,4 +426,4 @@ bool GitRepo::alternates_active() {
   return fs::exists(fs::path(gitdir_) / "objects" / "info" / "alternates", ec);
 }
 
-}  // namespace gitfs
+}  // namespace gitmount

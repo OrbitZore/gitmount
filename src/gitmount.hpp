@@ -1,7 +1,7 @@
-// gitfs — read-only git-to-FUSE filesystem (RFC 0000).
+// gitmount — read-only git-to-FUSE filesystem (RFC 0000).
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Gitfs: fuse_operations implementation (RFC 0000 §3.1–§3.6).
+// Gitmount: fuse_operations implementation (RFC 0000 §3.1–§3.6).
 //
 // Concurrency model (RFC 0000 §3.4): fuse3 multithreaded loop; a single
 // mutex (mu_) serializes every libgit2 call, the blob LRU, the st_ino
@@ -27,12 +27,12 @@
 #include "object_cache.hpp"
 #include "path_map.hpp"
 
-namespace gitfs {
+namespace gitmount {
 
-class Gitfs {
+class Gitmount {
  public:
-  Gitfs(std::unique_ptr<GitRepo> repo, std::string repo_abs_path, std::uint64_t blob_cache_bytes,
-        std::uint64_t tree_cache_bytes);
+  Gitmount(std::unique_ptr<GitRepo> repo, std::string repo_abs_path, std::uint64_t blob_cache_bytes,
+           std::uint64_t tree_cache_bytes);
 
   static const fuse_operations* fuse_ops();
 
@@ -49,7 +49,7 @@ class Gitfs {
       SubmoduleDir,     // gitlink rendered as an empty directory (§3.2)
       BlobFile,         // 100644 / 100755 entry
       Symlink,          // 120000 entry
-      SubmoduleMarker,  // "<name>.gitfs-submodule" synthetic file (§3.2)
+      SubmoduleMarker,  // "<name>.gitmount-submodule" synthetic file (§3.2)
       CommitsFile,
       JsonFile,
     };
@@ -128,7 +128,7 @@ class Gitfs {
   // ---------------------------------------------------------------------
   // submodule markers (RFC 0000 §3.2)
   // ---------------------------------------------------------------------
-  // Content of "<name>.gitfs-submodule": two key=value lines. Reads the
+  // Content of "<name>.gitmount-submodule": two key=value lines. Reads the
   // commit's root .gitmodules through the ordinary LRU blob path (§3.2).
   std::string submodule_marker_content_locked(const git_oid& commit_tree, const std::string& name,
                                               const git_oid& gitlink_oid);
@@ -166,8 +166,8 @@ class Gitfs {
   };
 
   std::unique_ptr<GitRepo> repo_;
-  std::string repo_abs_path_;    // realpath'd, for .gitfs.json
-  std::string json_content_;     // .gitfs.json body (§3.6, immutable)
+  std::string repo_abs_path_;    // realpath'd, for .gitmount.json
+  std::string json_content_;     // .gitmount.json body (§3.6, immutable)
   std::int64_t mount_time_ = 0;  // seconds since epoch
   std::uint64_t blob_cache_bytes_;
   std::uint64_t tree_cache_bytes_;
@@ -192,11 +192,11 @@ class Gitfs {
 // Byte-dictionary order (memcmp semantics, no locale) — RFC 0000 §3.1.
 bool byte_less(const std::string& a, const std::string& b);
 
-// %XX-escape invalid-UTF-8 bytes and JSON-quote a path for .gitfs.json
+// %XX-escape invalid-UTF-8 bytes and JSON-quote a path for .gitmount.json
 // (RFC 0000 §3.6: escaping guarantees valid JSON text, not reversibility).
 std::string json_quote_path(const std::string& s);
 
 // "2026-09-24T02:29:00Z" from a unix timestamp.
 std::string iso8601_utc(std::int64_t unix_time);
 
-}  // namespace gitfs
+}  // namespace gitmount

@@ -1,20 +1,20 @@
-.\" mount.gitfs(8) manual page — semantics per rfc/0000-gitfs.md (Q1-Q36)
-.TH MOUNT.GITFS 8 "2026-09-24" "gitfs 0.0.1" "System Administration"
+.\" mount.gitmount(8) manual page — semantics per rfc/0000-gitmount.md (Q1-Q36)
+.TH MOUNT.GITMOUNT 8 "2026-09-24" "gitmount 0.0.1" "System Administration"
 .SH NAME
-mount.gitfs \- mount a git repository as a read\-only FUSE filesystem
+mount.gitmount \- mount a git repository as a read\-only FUSE filesystem
 .SH SYNOPSIS
-.B mount.gitfs
+.B mount.gitmount
 .RB [ options ]
 .I repository
 .I mountpoint
 .br
 .B mount
-.BI \-t \ gitfs
+.BI \-t \ gitmount
 .RB [ options ]
 .I repository
 .I mountpoint
 .SH DESCRIPTION
-.B mount.gitfs
+.B mount.gitmount
 mounts a local git repository (bare or non\-bare, sha1 or sha256) as a
 .I read\-only
 FUSE filesystem.
@@ -40,7 +40,7 @@ Object access is provided by libgit2; no
 .B git
 subprocesses are spawned and no network access is performed.
 .SH INVOCATION
-.B mount.gitfs
+.B mount.gitmount
 follows the
 .BR mount (8)
 helper convention
@@ -48,7 +48,7 @@ helper convention
 and is installed in the system sbin directory, so it is invoked in one of
 three equivalent ways:
 .TP
-.BI mount \-t \ gitfs \ repository \ mountpoint
+.BI mount \-t \ gitmount \ repository \ mountpoint
 .BR mount (8)
 execs the helper per the helper contract
 .RI ( "[-sfnv] [-N namespace] [-o options] [-t type.subtype] src dir" ):
@@ -89,9 +89,9 @@ and no
 always reaches the helper with
 .B rw
 already in its options string, so a plain
-.B "mount \-t gitfs repo dir"
+.B "mount \-t gitmount repo dir"
 invokes
-.BR "mount.gitfs repo dir \-o rw" ,
+.BR "mount.gitmount repo dir \-o rw" ,
 which the helper accepts with a warning (see
 .B \-o
 under OPTIONS).
@@ -119,26 +119,26 @@ argv as
 .RI "src dir \-o rw \-t type.subtype" ;
 a dotless type never produces a \-t argument at all).
 For the dotless
-.I gitfs
+.I gitmount
 type it never arrives via
 .BR mount (8) ,
 but it is handled for contract completeness: an arriving
-.BI \-t \ gitfs
+.BI \-t \ gitmount
 (only reachable on a direct invocation) is accepted and noted with one
 verbose line, while any other value \-\- including a dotted
-.I gitfs.<x>
+.I gitmount.<x>
 that
 .BR mount (8)
 does forward when invoked as
-.B mount \-t\ gitfs.<x>
+.B mount \-t\ gitmount.<x>
 \-\- is a usage error, since the helper's filesystem type is
-.IR gitfs .
+.IR gitmount .
 .TP
 .I /etc/fstab
 entry
 .RS
 .nf
-/path/to/repo  /mnt/gitfs  gitfs  ro,blob\-cache\-size=128  0  0
+/path/to/repo  /mnt/gitmount  gitmount  ro,blob\-cache\-size=128  0  0
 .fi
 .RE
 .IP
@@ -168,10 +168,10 @@ classified as described under
 With util\-linux >= 2.35 a command\-line
 .B \-o
 augments the fstab options (the merged string may list the same key
-twice); gitfs\-specific keys then follow last\-one\-wins ordering
+twice); gitmount\-specific keys then follow last\-one\-wins ordering
 (see OPTIONS).
 .TP
-.B mount.gitfs
+.B mount.gitmount
 .I repository mountpoint
 Direct invocation; identical semantics.
 .PP
@@ -328,7 +328,7 @@ Each
 pins one snapshot version for the lifetime of the file handle, so refs
 changing mid\-read never corrupt a reader.
 .TP
-.I .gitfs.json
+.I .gitmount.json
 Mount metadata: format version, absolute repository path,
 .B head
 (ref name; full oid when detached; null when unborn),
@@ -355,7 +355,7 @@ for live HEAD.
 .BI \-o \ option[,option...]
 Comma\-separated options, the mount(8)\-style form of the long options
 below.
-The gitfs\-specific keys
+The gitmount\-specific keys
 .BI blob\-cache\-size= MiB
 and
 .BI tree\-cache\-size= MiB
@@ -378,7 +378,7 @@ unconditionally places
 .B rw
 in the helper's options string for a call without read\-only intent,
 so rejecting it would break the plain
-.B "mount \-t gitfs repo dir"
+.B "mount \-t gitmount repo dir"
 invocation (ro stays hardcoded and cannot be diluted; ntfs\-3g uses
 the same convention).
 Generic VFS options that libmount forwards verbatim in the \-o
@@ -394,7 +394,7 @@ quiet, showexec, and bsdgroups \(em all harmless under
 the hardcoded
 .B ro
 and the atime≡mtime semantics, so common habits such as
-.B "mount \-t gitfs \-o noatime,nodiratime repo dir"
+.B "mount \-t gitmount \-o noatime,nodiratime repo dir"
 and fstab entries with
 .B user
 (for non\-root mounting) or
@@ -425,10 +425,10 @@ only options listed in that table (see
 the
 .BR mount (8)
 manual, "Filesystem\-independent mount options"): a listed option that
-is a no\-op for gitfs \(em including in\-table negation keys not
+is a no\-op for gitmount \(em including in\-table negation keys not
 individually enumerated, such as noiversion, norelatime, nostrictatime,
 and nolazytime \(em is accepted and ignored;
-table options that would change gitfs semantics or security intent
+table options that would change gitmount semantics or security intent
 are usage errors; keys in neither track are forwarded to libfuse
 (so a direct invocation with keys mount(8) itself filters \(em defaults,
 auto, noauto, comment=, x\-*, loop, offset=, sizelimit=, and the
@@ -438,7 +438,7 @@ asymmetry with the mount(8) path, where they are filtered before the
 helper is exec'd and always succeed).
 When a future util\-linux release forwards a new key that the table
 does not list (as 2.41's symfollow was), it is triaged by hand \(em
-"is it a no\-op for gitfs?" \(em into the enumerated list, tracked in
+"is it a no\-op for gitmount?" \(em into the enumerated list, tracked in
 the maintenance checklist
 .IR docs/maintenance\-checklist.md
 (on each util\-linux release: diff the man
@@ -464,7 +464,7 @@ may override the baseline fsname (cosmetic only);
 is baseline\-protected and overriding it is a usage error, since the
 .I /proc/mounts
 type field and
-.B "mount \-t gitfs"
+.B "mount \-t gitmount"
 matching depend on it.
 All other keys are forwarded verbatim to the libfuse option parser
 (e.g.\&
@@ -489,7 +489,7 @@ of the open, and
 .B release
 frees it, so a sequential read decompresses exactly once (nothing is
 evicted to make room).
-Only the object lookup is performed under gitfs's internal lock; the
+Only the object lookup is performed under gitmount's internal lock; the
 full decompression runs outside it, so other requests on the mount are
 not stalled while it runs.
 The
@@ -569,23 +569,23 @@ Note that
 .B \-s
 does not relax unknown\-key rejection: mount(8) documents sloppy as
 ignoring mount options not supported by the filesystem, but silently
-swallowing mistyped gitfs\-specific keys would hide configuration
+swallowing mistyped gitmount\-specific keys would hide configuration
 errors, so unknown \-o keys are still classified as described above.
 .TP
 .BI \-t \ type
 Forwarded by
 .BR mount (8)
 only for a dotted filesystem type (a dotless type such as
-.I gitfs
+.I gitmount
 never produces a \-t argument; a dotted
-.I gitfs.<x>
+.I gitmount.<x>
 is forwarded verbatim), so this is chiefly reachable on a direct
 invocation.
-.BI \-t \ gitfs
+.BI \-t \ gitmount
 is accepted and noted with one verbose line (a redundant
 self-reference); any other value is a usage error, since the helper's
 filesystem type is
-.IR gitfs .
+.IR gitmount .
 .TP
 .B \-r ", " \-w
 Never received from
@@ -625,7 +625,7 @@ Directories are 0755, plain files 0644, executables 0755, symlinks 0777.
 The synthetic files
 .I commits
 and
-.I .gitfs.json
+.I .gitmount.json
 are mode 0444 (nlink 1); the root directory and the five entry
 directories
 .BR branch/ ,
@@ -658,7 +658,7 @@ time until first generated, while
 .B stat
 still reports size 0; after a fingerprint rebuild, stat reports the
 current cached version's time),
-.I .gitfs.json
+.I .gitmount.json
 the mount time.
 Blob
 .B st_size
@@ -718,7 +718,7 @@ reused.
 Equal inodes never imply hard links or shared content.
 .SS Submodules
 Rendered as an empty directory plus a sibling text file
-.IR <name>\.gitfs\-submodule
+.IR <name>\.gitmount\-submodule
 (mode 0644) containing two lines,
 .B url=<url>
 and
@@ -743,7 +743,7 @@ while
 still reports the truncated length (see File metadata).
 Targets may point anywhere, including outside the snapshot.
 .SS Object replacement
-.B gitfs
+.B gitmount
 does not honor
 .IR refs/replace :
 objects are always presented raw, matching
@@ -761,7 +761,7 @@ All directory listings (root,
 .BR tag/ ,
 .BR remote/ ,
 and tree directories, including the
-.I .gitfs\-submodule
+.I .gitmount\-submodule
 synthetic entries) are emitted in raw\-byte lexicographic order of each
 path component (memcmp, locale\-independent); the merged\-node union of
 tree entries and child\-ref names (see under
@@ -806,12 +806,12 @@ yields
 .BR ENOENT ,
 .I commits
 is an empty file (size 0), and
-.I .gitfs.json
+.I .gitmount.json
 reports
 .B head
 as null.
 .SS Concurrent repository maintenance
-.B gitfs
+.B gitmount
 neither locks the repository nor blocks external git commands.
 If
 .B "git gc"
@@ -823,7 +823,7 @@ that request transiently fails with
 (object gone) or
 .B EIO
 (pack invalidated mid\-read), and recovers once gc finishes;
-.B gitfs
+.B gitmount
 does not promise a stable object set for the lifetime of a mount.
 If a first\-time
 .I commits
@@ -866,20 +866,20 @@ Repository unreadable or not a git repository.
 Mount failure.
 .SH EXAMPLES
 .nf
-mount \-t gitfs ~/src/myproj /mnt/gitfs
-mount \-t gitfs \-o noatime,nodiratime ~/src/myproj /mnt/gitfs   # VFS no\-op keys accepted
-mount \-\-fake \-t gitfs ~/src/myproj /mnt/gitfs   # forwarded as \-f: validate only
-ls /mnt/gitfs/branch/main/src
-grep ^0beec7b /mnt/gitfs/commits      # resolve a short prefix
-cat /mnt/gitfs/commit/<full\-oid>/README.md
-diff \-r /mnt/gitfs/tag/v1.0/src /mnt/gitfs/branch/main/src
-fusermount3 \-u /mnt/gitfs            # or: umount /mnt/gitfs
+mount \-t gitmount ~/src/myproj /mnt/gitmount
+mount \-t gitmount \-o noatime,nodiratime ~/src/myproj /mnt/gitmount   # VFS no\-op keys accepted
+mount \-\-fake \-t gitmount ~/src/myproj /mnt/gitmount   # forwarded as \-f: validate only
+ls /mnt/gitmount/branch/main/src
+grep ^0beec7b /mnt/gitmount/commits      # resolve a short prefix
+cat /mnt/gitmount/commit/<full\-oid>/README.md
+diff \-r /mnt/gitmount/tag/v1.0/src /mnt/gitmount/branch/main/src
+fusermount3 \-u /mnt/gitmount            # or: umount /mnt/gitmount
 .fi
 .PP
 /etc/fstab:
 .nf
-/path/to/repo  /mnt/gitfs  gitfs  ro,blob\-cache\-size=128,tree\-cache\-size=512  0  0
-/path/to/repo  /mnt/gitfs  gitfs  ro,user,noatime  0  0    # non\-root mountable
+/path/to/repo  /mnt/gitmount  gitmount  ro,blob\-cache\-size=128,tree\-cache\-size=512  0  0
+/path/to/repo  /mnt/gitmount  gitmount  ro,user,noatime  0  0    # non\-root mountable
 .fi
 .SH SECURITY
 The kernel enforces ownership and permission checks
@@ -898,7 +898,7 @@ before use.
 .BR mount.fuse3 (8)
 .PP
 Full design and semantics:
-.I rfc/0000\-gitfs.md
+.I rfc/0000\-gitmount.md
 and
 .I docs/filesystem\-semantics.md
-in the gitfs source repository.
+in the gitmount source repository.

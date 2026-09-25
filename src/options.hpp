@@ -1,4 +1,4 @@
-// gitfs — read-only git-to-FUSE filesystem (RFC 0000).
+// gitmount — read-only git-to-FUSE filesystem (RFC 0000).
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // CLI / mount(8) helper argument parsing (RFC 0000 §3.7).
@@ -19,8 +19,8 @@
 //   rw                accepted as a no-op with a stderr warning (libmount
 //                     pre-seeds it unconditionally; ntfs-3g precedent)
 //   fsname=           may override the cosmetic baseline fsname
-//   subtype=          rejected: the baseline subtype=gitfs is protected
-//                     (/proc/mounts type field, mount -t gitfs matching)
+//   subtype=          rejected: the baseline subtype=gitmount is protected
+//                     (/proc/mounts type field, mount -t gitmount matching)
 //   enumerate track   measured no-op VFS keys -> accept, ignore, verbose
 //   reject track      suid dev remount uid= gid= umask= context= fscontext=
 //                     defcontext= rootcontext= -> dedicated error, exit 1
@@ -40,7 +40,7 @@
 #include <string>
 #include <vector>
 
-namespace gitfs::cli {
+namespace gitmount::cli {
 
 struct Options {
   std::string repository;
@@ -52,7 +52,7 @@ struct Options {
 
   std::uint64_t blob_cache_bytes = 64ULL << 20;   // 64 MiB default
   std::uint64_t tree_cache_bytes = 256ULL << 20;  // 256 MiB default
-  std::string fsname = "gitfs";
+  std::string fsname = "gitmount";
 
   // Keys passed through to libfuse (e.g. kernel_cache, allow_other).
   std::vector<std::string> fuse_passthrough;
@@ -81,4 +81,4 @@ ParseResult parse(int argc, char* const argv[]);
 const char* version_string();
 const char* usage_text();
 
-}  // namespace gitfs::cli
+}  // namespace gitmount::cli

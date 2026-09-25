@@ -1,6 +1,6 @@
-// gitfs — read-only git-to-FUSE filesystem (RFC 0000).
+// gitmount — read-only git-to-FUSE filesystem (RFC 0000).
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "gitfs.hpp"
+#include "gitmount.hpp"
 
 #include <fcntl.h>
 #include <limits.h>
@@ -15,7 +15,7 @@
 #include "log.hpp"
 #include "path_map.hpp"
 
-namespace gitfs {
+namespace gitmount {
 
 namespace {
 
@@ -23,7 +23,7 @@ using pathmap::Kind;
 using pathmap::Ns;
 using pathmap::Parsed;
 
-Gitfs* self() { return static_cast<Gitfs*>(fuse_get_context()->private_data); }
+Gitmount* self() { return static_cast<Gitmount*>(fuse_get_context()->private_data); }
 
 // First components of every ref name below `prefix` (e.g. refs/heads), deduped
 // and byte-sorted (RFC 0000 §3.1: nested names render as grouping dirs and
@@ -127,11 +127,11 @@ std::string json_quote_path(const std::string& s) {
 }
 
 // ---------------------------------------------------------------------------
-// construction / .gitfs.json (RFC 0000 §3.6)
+// construction / .gitmount.json (RFC 0000 §3.6)
 // ---------------------------------------------------------------------------
 
-Gitfs::Gitfs(std::unique_ptr<GitRepo> repo, std::string repo_abs_path,
-             std::uint64_t blob_cache_bytes, std::uint64_t tree_cache_bytes)
+Gitmount::Gitmount(std::unique_ptr<GitRepo> repo, std::string repo_abs_path,
+                   std::uint64_t blob_cache_bytes, std::uint64_t tree_cache_bytes)
     : repo_(std::move(repo)),
       repo_abs_path_(std::move(repo_abs_path)),
       blob_cache_bytes_(blob_cache_bytes),
@@ -175,8 +175,8 @@ Gitfs::Gitfs(std::unique_ptr<GitRepo> repo, std::string repo_abs_path,
 // resolution (RFC 0000 §3.1)
 // ---------------------------------------------------------------------------
 
-int Gitfs::walk_tree_locked(const git_oid& root_tree, const std::vector<std::string>& comps,
-                            std::int64_t commit_time, Node* out) {
+int Gitmount::walk_tree_locked(const git_oid& root_tree, const std::vector<std::string>& comps,
+                               std::int64_t commit_time, Node* out) {
   git_oid cur = root_tree;
   out->commit_root_tree = root_tree;
   std::string walked;  // path inside the commit tree ("" at the root)
@@ -186,11 +186,11 @@ int Gitfs::walk_tree_locked(const git_oid& root_tree, const std::vector<std::str
 
     auto entry = repo_->tree_entry(cur, name);
     if (!entry) {
-      // Submodule marker fallback: "<name>.gitfs-submodule" with no real
+      // Submodule marker fallback: "<name>.gitmount-submodule" with no real
       // entry of that name and a gitlink base entry (RFC 0000 §3.2). A real
       // entry always wins (checked above by the failed lookup).
-      constexpr const char* kSuffix = ".gitfs-submodule";
-      constexpr std::size_t kSuffixLen = 16;
+      constexpr char kSuffix[] = ".gitmount-submodule";
+      constexpr std::size_t kSuffixLen = sizeof(kSuffix) - 1;
       if (name.size() > kSuffixLen &&
           name.compare(name.size() - kSuffixLen, kSuffixLen, kSuffix) == 0) {
         const std::string base = name.substr(0, name.size() - kSuffixLen);
@@ -263,7 +263,7 @@ int peel_ref_to_root(GitRepo* repo, const git_oid& target, const std::string& re
 
 }  // namespace
 
-int Gitfs::resolve_head_locked(const std::vector<std::string>& tree_comps, Node* out) {
+int Gitmount::resolve_head_locked(const std::vector<std::string>& tree_comps, Node* out) {
   const HeadInfo head = repo_->head();
   if (head.state == HeadInfo::State::Unborn) return -ENOENT;
 
@@ -283,8 +283,8 @@ int Gitfs::resolve_head_locked(const std::vector<std::string>& tree_comps, Node*
   return walk_tree_locked(root, tree_comps, when, out);
 }
 
-int Gitfs::resolve_ns_locked(const std::string& ref_ns_prefix,
-                             const std::vector<std::string>& comps, Node* out) {
+int Gitmount::resolve_ns_locked(const std::string& ref_ns_prefix,
+                                const std::vector<std::string>& comps, Node* out) {
   // Longest ref name match first (RFC 0000 §3.1): in D/F-violating repos
   // (hand-edited packed-refs) /tag/foo/bar resolves to refs/tags/foo/bar,
   // never to ref foo's tree entry "bar".
@@ -343,7 +343,7 @@ int Gitfs::resolve_ns_locked(const std::string& ref_ns_prefix,
   return -ENOENT;
 }
 
-int Gitfs::resolve_remote_locked(const std::vector<std::string>& comps, Node* out) {
+int Gitmount::resolve_remote_locked(const std::vector<std::string>& comps, Node* out) {
   const std::string ns = comps[0];
   const std::string ns_prefix = "refs/remotes/" + ns;
 
@@ -431,7 +431,7 @@ int Gitfs::resolve_remote_locked(const std::vector<std::string>& comps, Node* ou
   return -ENOENT;
 }
 
-int Gitfs::resolve_locked(const std::string& path, Node* out) {
+int Gitmount::resolve_locked(const std::string& path, Node* out) {
   *out = Node{};
   const Parsed p = pathmap::parse(path);
   if (p.kind == Kind::Invalid) return -p.err;
@@ -488,8 +488,9 @@ int Gitfs::resolve_locked(const std::string& path, Node* out) {
 // readdir enumeration
 // ---------------------------------------------------------------------------
 
-void Gitfs::append_tree_entries_locked(const git_oid& tree, const std::string& ref_prefix_for_union,
-                                       std::vector<DirEntry>* out) {
+void Gitmount::append_tree_entries_locked(const git_oid& tree,
+                                          const std::string& ref_prefix_for_union,
+                                          std::vector<DirEntry>* out) {
   auto entries = repo_->tree_entries(tree);
   if (!entries) return;
 
@@ -522,7 +523,7 @@ void Gitfs::append_tree_entries_locked(const git_oid& tree, const std::string& r
         // the marker name wins and the synthetic file is omitted (§3.2).
         de.mode = S_IFDIR;
         out->push_back(de);
-        const std::string marker = e.name + ".gitfs-submodule";
+        const std::string marker = e.name + ".gitmount-submodule";
         bool shadowed = false;
         for (const auto& other : *entries) {
           if (other.name == marker) {
@@ -571,11 +572,15 @@ void Gitfs::append_tree_entries_locked(const git_oid& tree, const std::string& r
             [](const DirEntry& a, const DirEntry& b) { return byte_less(a.name, b.name); });
 }
 
-int Gitfs::list_dir_locked(const std::string&, const Node& node, std::vector<DirEntry>* out) {
+int Gitmount::list_dir_locked(const std::string&, const Node& node, std::vector<DirEntry>* out) {
   switch (node.type) {
     case Node::Type::RootDir:
-      *out = {{".gitfs.json", S_IFREG}, {"HEAD", S_IFDIR},    {"branch", S_IFDIR},
-              {"commit", S_IFDIR},      {"commits", S_IFREG}, {"remote", S_IFDIR},
+      *out = {{".gitmount.json", S_IFREG},
+              {"HEAD", S_IFDIR},
+              {"branch", S_IFDIR},
+              {"commit", S_IFDIR},
+              {"commits", S_IFREG},
+              {"remote", S_IFDIR},
               {"tag", S_IFDIR}};
       return 0;
     case Node::Type::EntryDir: {
@@ -633,7 +638,7 @@ int Gitfs::list_dir_locked(const std::string&, const Node& node, std::vector<Dir
 // blob access (segmented locking, RFC 0000 §3.4/§3.5)
 // ---------------------------------------------------------------------------
 
-int Gitfs::decompress_blob_unlocked(const git_oid& oid, std::string* out) {
+int Gitmount::decompress_blob_unlocked(const git_oid& oid, std::string* out) {
   const int rc = repo_->read_blob(oid, out);
   if (rc != 0) return rc;
   log::vlog("blob decompressed (oversized open-pin): %s %zu bytes", oid_to_hex(oid).c_str(),
@@ -641,7 +646,7 @@ int Gitfs::decompress_blob_unlocked(const git_oid& oid, std::string* out) {
   return 0;
 }
 
-int Gitfs::load_blob_locked(const git_oid& oid, BlobView* view) {
+int Gitmount::load_blob_locked(const git_oid& oid, BlobView* view) {
   const std::string key = oid_to_hex(oid);
   if (const std::string* hit = blob_cache_.lookup(key)) {
     log::vlog("blob cache hit: %s", key.c_str());
@@ -681,7 +686,7 @@ int Gitfs::load_blob_locked(const git_oid& oid, BlobView* view) {
 // /commits (RFC 0000 §3.5)
 // ---------------------------------------------------------------------------
 
-std::string Gitfs::compute_fingerprint_locked() {
+std::string Gitmount::compute_fingerprint_locked() {
   auto names = repo_->all_refs();
   std::sort(names.begin(), names.end(), byte_less);
   std::string fp;
@@ -707,7 +712,7 @@ std::string Gitfs::compute_fingerprint_locked() {
   return fp;
 }
 
-int Gitfs::open_commits(std::shared_ptr<const std::string>* out) {
+int Gitmount::open_commits(std::shared_ptr<const std::string>* out) {
   std::unique_lock<std::mutex> g(commits_gen_mu_);
 
   // Fast path under mu_.
@@ -809,9 +814,9 @@ int Gitfs::open_commits(std::shared_ptr<const std::string>* out) {
 // submodule markers (RFC 0000 §3.2)
 // ---------------------------------------------------------------------------
 
-std::string Gitfs::submodule_marker_content_locked(const git_oid& commit_tree,
-                                                   const std::string& name,
-                                                   const git_oid& gitlink_oid) {
+std::string Gitmount::submodule_marker_content_locked(const git_oid& commit_tree,
+                                                      const std::string& name,
+                                                      const git_oid& gitlink_oid) {
   std::string url;
   auto root = repo_->tree_entries(commit_tree);
   const git_oid* modules_oid = nullptr;
@@ -848,7 +853,7 @@ std::string Gitfs::submodule_marker_content_locked(const git_oid& commit_tree,
 // metadata helpers (RFC 0000 §3.2)
 // ---------------------------------------------------------------------------
 
-void Gitfs::fill_dir_stat(struct stat* st, std::int64_t mtime) {
+void Gitmount::fill_dir_stat(struct stat* st, std::int64_t mtime) {
   std::memset(st, 0, sizeof(*st));
   st->st_mode = S_IFDIR | 0755;
   st->st_nlink = 2;
@@ -860,7 +865,8 @@ void Gitfs::fill_dir_stat(struct stat* st, std::int64_t mtime) {
   st->st_atime = st->st_mtime = st->st_ctime = static_cast<time_t>(mtime);
 }
 
-void Gitfs::fill_file_stat(struct stat* st, std::int64_t mtime, std::uint64_t size, mode_t perm) {
+void Gitmount::fill_file_stat(struct stat* st, std::int64_t mtime, std::uint64_t size,
+                              mode_t perm) {
   std::memset(st, 0, sizeof(*st));
   st->st_mode = perm;
   st->st_nlink = 1;
@@ -876,8 +882,8 @@ void Gitfs::fill_file_stat(struct stat* st, std::int64_t mtime, std::uint64_t si
 // FUSE callbacks
 // ---------------------------------------------------------------------------
 
-int Gitfs::cb_getattr(const char* path_c, struct stat* st, struct fuse_file_info*) {
-  Gitfs* fs = self();
+int Gitmount::cb_getattr(const char* path_c, struct stat* st, struct fuse_file_info*) {
+  Gitmount* fs = self();
   const std::string path(path_c);
   std::lock_guard<std::mutex> lk(fs->mu_);
 
@@ -940,8 +946,8 @@ int Gitfs::cb_getattr(const char* path_c, struct stat* st, struct fuse_file_info
   return 0;
 }
 
-int Gitfs::cb_readlink(const char* path_c, char* buf, std::size_t size) {
-  Gitfs* fs = self();
+int Gitmount::cb_readlink(const char* path_c, char* buf, std::size_t size) {
+  Gitmount* fs = self();
   std::lock_guard<std::mutex> lk(fs->mu_);
 
   Node node;
@@ -968,8 +974,8 @@ int Gitfs::cb_readlink(const char* path_c, char* buf, std::size_t size) {
   return 0;
 }
 
-int Gitfs::cb_opendir(const char* path_c, struct fuse_file_info* fi) {
-  Gitfs* fs = self();
+int Gitmount::cb_opendir(const char* path_c, struct fuse_file_info* fi) {
+  Gitmount* fs = self();
   const std::string path(path_c);
   std::lock_guard<std::mutex> lk(fs->mu_);
 
@@ -993,8 +999,8 @@ int Gitfs::cb_opendir(const char* path_c, struct fuse_file_info* fi) {
   return 0;
 }
 
-int Gitfs::cb_readdir(const char*, void* buf, fuse_fill_dir_t filler, off_t offset,
-                      struct fuse_file_info* fi, enum fuse_readdir_flags) {
+int Gitmount::cb_readdir(const char*, void* buf, fuse_fill_dir_t filler, off_t offset,
+                         struct fuse_file_info* fi, enum fuse_readdir_flags) {
   auto* list = reinterpret_cast<DirList*>(fi->fh);
   if (!list) return -EINVAL;
   // Plain filler stats (ino + type): full attributes stay with getattr —
@@ -1010,14 +1016,14 @@ int Gitfs::cb_readdir(const char*, void* buf, fuse_fill_dir_t filler, off_t offs
   return 0;
 }
 
-int Gitfs::cb_releasedir(const char*, struct fuse_file_info* fi) {
+int Gitmount::cb_releasedir(const char*, struct fuse_file_info* fi) {
   delete reinterpret_cast<DirList*>(fi->fh);
   fi->fh = 0;
   return 0;
 }
 
-int Gitfs::cb_open(const char* path_c, struct fuse_file_info* fi) {
-  Gitfs* fs = self();
+int Gitmount::cb_open(const char* path_c, struct fuse_file_info* fi) {
+  Gitmount* fs = self();
   const std::string path(path_c);
 
   // Only O_RDONLY opens are valid; write flags get EROFS (RFC 0000 §3.3).
@@ -1097,9 +1103,9 @@ int Gitfs::cb_open(const char* path_c, struct fuse_file_info* fi) {
   return 0;
 }
 
-int Gitfs::cb_read(const char* path_c, char* buf, std::size_t size, off_t offset,
-                   struct fuse_file_info* fi) {
-  Gitfs* fs = self();
+int Gitmount::cb_read(const char* path_c, char* buf, std::size_t size, off_t offset,
+                      struct fuse_file_info* fi) {
+  Gitmount* fs = self();
   auto* handle = reinterpret_cast<Handle*>(fi->fh);
   if (!handle) return -EINVAL;
 
@@ -1144,14 +1150,14 @@ int Gitfs::cb_read(const char* path_c, char* buf, std::size_t size, off_t offset
   return static_cast<int>(copy);
 }
 
-int Gitfs::cb_release(const char*, struct fuse_file_info* fi) {
+int Gitmount::cb_release(const char*, struct fuse_file_info* fi) {
   delete reinterpret_cast<Handle*>(fi->fh);
   fi->fh = 0;
   return 0;
 }
 
-int Gitfs::cb_statfs(const char*, struct statvfs* st) {
-  Gitfs* fs = self();
+int Gitmount::cb_statfs(const char*, struct statvfs* st) {
+  Gitmount* fs = self();
   std::lock_guard<std::mutex> lk(fs->mu_);
   const std::uint64_t bytes = fs->repo_->odb_disk_bytes();
   std::memset(st, 0, sizeof(*st));
@@ -1165,9 +1171,9 @@ int Gitfs::cb_statfs(const char*, struct statvfs* st) {
   return 0;
 }
 
-int Gitfs::cb_erofs() { return -EROFS; }
+int Gitmount::cb_erofs() { return -EROFS; }
 
-const fuse_operations* Gitfs::fuse_ops() {
+const fuse_operations* Gitmount::fuse_ops() {
   static const fuse_operations ops = [] {
     fuse_operations o{};
     o.getattr = cb_getattr;
@@ -1205,4 +1211,4 @@ const fuse_operations* Gitfs::fuse_ops() {
   return &ops;
 }
 
-}  // namespace gitfs
+}  // namespace gitmount

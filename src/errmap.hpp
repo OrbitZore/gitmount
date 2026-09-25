@@ -1,8 +1,8 @@
-// gitfs — read-only git-to-FUSE filesystem (RFC 0000).
+// gitmount — read-only git-to-FUSE filesystem (RFC 0000).
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-namespace gitfs {
+namespace gitmount {
 
 // Translate a libgit2 error code to an errno value (RFC 0000 §3.3).
 //
@@ -19,7 +19,7 @@ namespace gitfs {
 //   anything else < 0    -> EIO      (ODB corruption, read errors, ...)
 //
 // Non-error degradations (readlink NUL truncation, empty symlink target)
-// are handled in gitfs.cpp and must never reach this table (§3.3 note).
+// are handled in gitmount.cpp and must never reach this table (§3.3 note).
 int git_to_errno(int git_error_code);
 
-}  // namespace gitfs
+}  // namespace gitmount

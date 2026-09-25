@@ -1,4 +1,4 @@
-# gitfs CI — RFC 0000 §5: lint + build + test matrix.
+# gitmount CI — RFC 0000 §5: lint + build + test matrix.
 # SPDX-License-Identifier: GPL-3.0-or-later
 name: ci
 
@@ -67,7 +67,7 @@ jobs:
         run: >
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
-          -DGITFS_WERROR=ON
+          -DGITMOUNT_WERROR=ON
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
       - name: Build
         run: cmake --build build
@@ -79,12 +79,12 @@ jobs:
         if: matrix.compiler == 'gcc'
         run: >
           sudo env PATH="$PATH" TMPDIR=/tmp
-          tests/integration/run_tests.sh "$PWD/build/mount.gitfs"
+          tests/integration/run_tests.sh "$PWD/build/mount.gitmount"
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: mount.gitfs-${{ matrix.compiler }}-system
-          path: build/mount.gitfs
+          name: mount.gitmount-${{ matrix.compiler }}-system
+          path: build/mount.gitmount
 
   vendored-build:
     # The pinned static libgit2 path used for release binaries (see
@@ -102,8 +102,8 @@ jobs:
         run: >
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
-          -DGITFS_WERROR=ON
-          -DGITFS_USE_SYSTEM_LIBGIT2=OFF
+          -DGITMOUNT_WERROR=ON
+          -DGITMOUNT_USE_SYSTEM_LIBGIT2=OFF
       - name: Build
         run: cmake --build build
       - name: Unit tests
@@ -126,7 +126,7 @@ jobs:
         run: >
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Debug
-          -DGITFS_WERROR=ON
+          -DGITMOUNT_WERROR=ON
           -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer'
           -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
       - name: Build
@@ -145,5 +145,5 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: mount.gitfs-sanitized
-          path: build/mount.gitfs
+          name: mount.gitmount-sanitized
+          path: build/mount.gitmount

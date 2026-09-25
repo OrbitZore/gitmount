@@ -8,7 +8,7 @@ line until a stable 1.0).
 
 ## Threat model (summary)
 
-gitfs is a read-only, content-addressed data plane: it performs no network
+gitmount is a read-only, content-addressed data plane: it performs no network
 access and offers no write path. The relevant risks are (a) untrusted
 repository contents — symlink targets, objects crafted to bypass `git
 fsck`, overlong names — and (b) repository mutation by external processes
@@ -26,11 +26,11 @@ Practical guidance:
 ## Reporting a vulnerability
 
 Please report privately via
-[GitHub security advisories](https://github.com/OrbitZore/gitfs/security/advisories/new)
+[GitHub security advisories](https://github.com/OrbitZore/gitmount/security/advisories/new)
 ("Report a vulnerability"), or contact the maintainers directly (see
 `git shortlog -sne` for active maintainers). Include:
 
-1. The gitfs version (`mount.gitfs --version`) and library versions.
+1. The gitmount version (`mount.gitmount --version`) and library versions.
 2. A minimal reproduction — ideally a repository shape describable with
    `tests/fixtures/make_repo.sh` operations.
 3. Impact assessment and any mitigations you have considered.
