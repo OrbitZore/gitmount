@@ -47,10 +47,18 @@ struct TreeData {
   std::size_t cost() const { return raw.size() + offsets.size() * sizeof(std::uint32_t); }
 };
 
+// TreeIndex offsets are uint32; a serialized tree longer than this cannot
+// be indexed without wrapping (an offset past 4 GiB would alias an early
+// entry), so such trees are rejected as malformed.
+constexpr std::size_t kMaxIndexableTree = UINT32_MAX;
+
 // Build the offset index over a serialized tree. Returns nullopt on a
-// malformed buffer (bad mode, missing NUL, truncated oid) — callers map
-// that to ENOENT plus a warning, matching the previous libgit2 behavior.
-std::optional<TreeIndex> index_tree(const char* data, std::size_t len, git_oid_t oid_type);
+// malformed buffer (bad mode, missing NUL, truncated oid, or larger than
+// max_len) — callers map that to ENOENT plus a warning, matching the
+// previous libgit2 behavior. `max_len` is a test seam for injecting a
+// small indexable cap; production callers use the UINT32_MAX default.
+std::optional<TreeIndex> index_tree(const char* data, std::size_t len, git_oid_t oid_type,
+                                    std::size_t max_len = kMaxIndexableTree);
 
 // Parse the entry at `off` inside a tree buffer previously validated by
 // index_tree. Returns nullopt if `off` is out of range.

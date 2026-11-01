@@ -35,7 +35,11 @@ bool oid_from_hex(const char* hex, std::size_t len, git_oid_t oid_type, git_oid*
 
 }  // namespace
 
-std::optional<TreeIndex> index_tree(const char* data, std::size_t len, git_oid_t oid_type) {
+std::optional<TreeIndex> index_tree(const char* data, std::size_t len, git_oid_t oid_type,
+                                    std::size_t max_len) {
+  // Offset wraparound guard: offsets are uint32, so a tree larger than
+  // max_len (UINT32_MAX in production) is not representable in the index.
+  if (len > max_len) return std::nullopt;
   const std::size_t oid_raw = oid_type == GIT_OID_SHA1 ? 20 : 32;
   TreeIndex offsets;
   const char* p = data;

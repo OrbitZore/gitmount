@@ -88,6 +88,12 @@ TEST_CASE("index_tree rejects malformed buffers", "[rawobj]") {
   std::string nonul = "100644 abcdef";
   nonul.append(20, '\x01');
   CHECK_FALSE(index_tree(nonul.data(), nonul.size(), GIT_OID_SHA1).has_value());
+  // over the indexable cap (threshold injection; production default is
+  // UINT32_MAX, where a >4 GiB tree would wrap the uint32 offsets)
+  std::string ok;
+  append_entry(&ok, "100644", "a.txt", oid_of(kOid1));
+  CHECK(index_tree(ok.data(), ok.size(), GIT_OID_SHA1, ok.size()).has_value());
+  CHECK_FALSE(index_tree(ok.data(), ok.size(), GIT_OID_SHA1, ok.size() - 1).has_value());
 }
 
 TEST_CASE("tree_find: exact match, miss, and mode dispatch", "[rawobj]") {

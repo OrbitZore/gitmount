@@ -665,7 +665,8 @@ std::shared_ptr<const rawobj::TreeData> Gitmount::tree_locked(const git_oid& tre
   if (rc == 0) {
     auto idx = rawobj::index_tree(buf.data(), buf.size(), repo_->oid_type());
     if (!idx) {
-      bad = true;  // corrupt/hand-crafted garbage
+      bad = true;  // corrupt/hand-crafted garbage (or an unindexable >4 GiB tree)
+      log::warn("tree object %s is malformed (unindexable); treated as unreadable", key.c_str());
     } else {
       auto td = std::make_shared<rawobj::TreeData>();
       td->raw = std::move(buf);
