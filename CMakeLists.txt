@@ -142,6 +142,7 @@ if(GITMOUNT_BUILD_TESTS)
     tests/unit/test_object_cache.cpp
     tests/unit/test_errmap.cpp
     tests/unit/test_ino_registry.cpp
+    tests/unit/test_lock_guards.cpp
     tests/unit/test_options.cpp
     tests/unit/test_gitmodules.cpp
     tests/unit/test_rawobj.cpp

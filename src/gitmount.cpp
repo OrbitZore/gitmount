@@ -655,25 +655,30 @@ std::shared_ptr<const rawobj::TreeData> Gitmount::tree_locked(const git_oid& tre
     if (hit->kind == MetaValue::Kind::Tree) return hit->tree;
   }
 
-  mu_.unlock();
+  // Read outside the lock (segmented load). ScopedUnlock re-locks mu_ on
+  // every exit path — including an allocation failure (issue #4) — so the
+  // caller's lock_guard never destructs an unlocked mutex.
   git_object_t type = GIT_OBJECT_ANY;
   std::string buf;
-  int rc = repo_->read_object(tree, &type, &buf);
+  int rc = 0;
   bool bad = false;
   std::shared_ptr<const rawobj::TreeData> owned;
-  if (rc == 0 && type != GIT_OBJECT_TREE) rc = ENOENT;  // like git_tree_lookup
-  if (rc == 0) {
-    auto idx = rawobj::index_tree(buf.data(), buf.size(), repo_->oid_type());
-    if (!idx) {
-      bad = true;  // corrupt/hand-crafted garbage
-    } else {
-      auto td = std::make_shared<rawobj::TreeData>();
-      td->raw = std::move(buf);
-      td->offsets = std::move(*idx);
-      owned = std::move(td);
+  {
+    ScopedUnlock unlock(mu_);
+    rc = repo_->read_object(tree, &type, &buf);
+    if (rc == 0 && type != GIT_OBJECT_TREE) rc = ENOENT;  // like git_tree_lookup
+    if (rc == 0) {
+      auto idx = rawobj::index_tree(buf.data(), buf.size(), repo_->oid_type());
+      if (!idx) {
+        bad = true;  // corrupt/hand-crafted garbage
+      } else {
+        auto td = std::make_shared<rawobj::TreeData>();
+        td->raw = std::move(buf);
+        td->offsets = std::move(*idx);
+        owned = std::move(td);
+      }
     }
   }
-  mu_.lock();
 
   *malformed = bad;
   if (rc != 0 || bad) return nullptr;
@@ -699,41 +704,43 @@ int Gitmount::commit_facts_locked(const git_oid& target, git_oid* commit_out,
     }
   }
 
-  // Miss: read the object and walk the tag chain outside the lock.
-  mu_.unlock();
+  // Miss: read the object and walk the tag chain outside the lock
+  // (ScopedUnlock re-locks on every exit path, including throws — issue #4).
   git_oid cur = target;
   rawobj::CommitFacts facts;
   int rc = 0;
   bool ok = false;
-  for (int hop = 0; hop < 16; ++hop) {
-    git_object_t type = GIT_OBJECT_ANY;
-    std::string buf;
-    rc = repo_->read_object(cur, &type, &buf);
-    if (rc != 0) break;
-    if (type == GIT_OBJECT_COMMIT) {
-      auto f = rawobj::parse_commit(buf.data(), buf.size(), repo_->oid_type());
-      if (!f) {
-        rc = EIO;  // malformed commit object
+  {
+    ScopedUnlock unlock(mu_);
+    for (int hop = 0; hop < 16; ++hop) {
+      git_object_t type = GIT_OBJECT_ANY;
+      std::string buf;
+      rc = repo_->read_object(cur, &type, &buf);
+      if (rc != 0) break;
+      if (type == GIT_OBJECT_COMMIT) {
+        auto f = rawobj::parse_commit(buf.data(), buf.size(), repo_->oid_type());
+        if (!f) {
+          rc = EIO;  // malformed commit object
+          break;
+        }
+        facts = *f;
+        ok = true;
         break;
       }
-      facts = *f;
-      ok = true;
+      if (type == GIT_OBJECT_TAG) {
+        auto next = rawobj::parse_tag(buf.data(), buf.size(), repo_->oid_type());
+        if (!next) {
+          rc = EIO;
+          break;
+        }
+        cur = *next;
+        continue;
+      }
+      rc = EINVAL;  // tree/blob: non-commit target (§3.1 unified rule)
       break;
     }
-    if (type == GIT_OBJECT_TAG) {
-      auto next = rawobj::parse_tag(buf.data(), buf.size(), repo_->oid_type());
-      if (!next) {
-        rc = EIO;
-        break;
-      }
-      cur = *next;
-      continue;
-    }
-    rc = EINVAL;  // tree/blob: non-commit target (§3.1 unified rule)
-    break;
+    if (!ok && rc == 0) rc = EINVAL;  // tag chain too deep
   }
-  if (!ok && rc == 0) rc = EINVAL;  // tag chain too deep
-  mu_.lock();
 
   if (rc != 0) return -rc;
   if (auto hit = meta_cache_.lookup(key)) {  // lost the race
@@ -775,13 +782,16 @@ int Gitmount::load_blob_locked(const git_oid& oid, BlobView* view) {
     return 0;
   }
 
-  // Miss: decompress outside the lock (§3.4 exception 3).
-  mu_.unlock();
+  // Miss: decompress outside the lock (§3.4 exception 3); ScopedUnlock
+  // re-locks on every exit path, including allocation failures (issue #4).
   std::string data;
-  const int rc = repo_->read_blob(oid, &data);
-  if (rc == 0)
-    log::vlog("blob decompressed (cache miss load): %s %zu bytes", key.c_str(), data.size());
-  mu_.lock();
+  int rc = 0;
+  {
+    ScopedUnlock unlock(mu_);
+    rc = repo_->read_blob(oid, &data);
+    if (rc == 0)
+      log::vlog("blob decompressed (cache miss load): %s %zu bytes", key.c_str(), data.size());
+  }
   if (rc != 0) return rc;
 
   // Re-check: a concurrent loader may have won the race (no strict
@@ -839,7 +849,7 @@ std::string Gitmount::compute_fingerprint_locked() {
 }
 
 int Gitmount::open_commits(std::shared_ptr<const std::string>* out) {
-  std::unique_lock<std::mutex> g(commits_gen_mu_);
+  auto g = commits_flight_.hold();
 
   // Fast path under mu_.
   {
@@ -850,11 +860,10 @@ int Gitmount::open_commits(std::shared_ptr<const std::string>* out) {
     }
   }
 
-  if (commits_generating_) {
-    // Single-flight: wait for the in-flight generation and share its
-    // outcome — success reuses the buffer, failure maps to EIO (§3.4/§3.5).
-    const std::uint64_t epoch = commits_epoch_;
-    commits_cv_.wait(g, [&] { return commits_epoch_ != epoch; });
+  if (!commits_flight_.begin_or_wait(g)) {
+    // Single-flight rider: the in-flight generation finished — share its
+    // outcome. A published buffer wins; no buffer means it failed → EIO
+    // (§3.4/§3.5), and the next open retries generation from scratch.
     std::lock_guard<std::mutex> lk(mu_);
     if (commits_buffer_) {
       *out = commits_buffer_;
@@ -863,23 +872,33 @@ int Gitmount::open_commits(std::shared_ptr<const std::string>* out) {
     return -EIO;
   }
 
-  // Double-check after acquiring the generation lock.
+  // Generator. GeneratorFinish resets the flight on every exit path —
+  // including exceptions, which previously left the in-flight flag set
+  // forever, parking all later opens on the condition variable until the
+  // libfuse worker pool drained (issue #4).
+  GeneratorFinish fin(commits_flight_, g);
+
+  // Double-check after acquiring the generation lock: the repo's refs may
+  // have changed back to the cached fingerprint since the fast path.
   {
     std::lock_guard<std::mutex> lk(mu_);
     if (commits_buffer_ && commits_fingerprint_ == compute_fingerprint_locked()) {
       *out = commits_buffer_;
+      fin.finish();
       return 0;
     }
   }
 
-  commits_generating_ = true;
   g.unlock();
 
   // ---- generation (chunked locking inside list_commits) ------------------
+  // Any exception (bad_alloc in fingerprint/ref handling or buffer growth)
+  // maps to generation failure: ok=false → EIO, next open retries (§3.5) —
+  // nothing may escape open_commits with the flight still marked in progress.
   std::string fingerprint;
   std::string buffer;
   bool ok = false;
-  {
+  try {
     std::lock_guard<std::mutex> lk(mu_);
     fingerprint = compute_fingerprint_locked();
 
@@ -918,11 +937,11 @@ int Gitmount::open_commits(std::shared_ptr<const std::string>* out) {
 
     ok =
         repo_->list_commits(pushes, [this] { mu_.unlock(); }, [this] { mu_.lock(); }, &buffer) == 0;
+  } catch (...) {
+    ok = false;  // e.g. bad_alloc: generation failed, retry on next open
   }
 
   g.lock();
-  commits_generating_ = false;
-  ++commits_epoch_;
   {
     std::lock_guard<std::mutex> lk(mu_);
     if (ok) {
@@ -934,7 +953,7 @@ int Gitmount::open_commits(std::shared_ptr<const std::string>* out) {
     // Failure: half-built buffer dropped, fingerprint untouched — "as if
     // never generated"; the next open retries from scratch (§3.5).
   }
-  commits_cv_.notify_all();
+  fin.finish();  // reset flag, advance epoch, wake riders (§3.4/§3.5)
   return ok ? 0 : -EIO;
 }
 
@@ -1010,120 +1029,142 @@ void Gitmount::fill_file_stat(struct stat* st, std::int64_t mtime, std::uint64_t
 // ---------------------------------------------------------------------------
 
 int Gitmount::cb_getattr(const char* path_c, struct stat* st, struct fuse_file_info*) {
-  Gitmount* fs = self();
-  const std::string path(path_c);
-  std::lock_guard<std::mutex> lk(fs->mu_);
+  // Boundary guard (issue #4): no exception may escape a FUSE callback into
+  // libfuse's C frames — allocation failure maps to ENOMEM, anything else
+  // to EIO.
+  try {
+    Gitmount* fs = self();
+    const std::string path(path_c);
+    std::lock_guard<std::mutex> lk(fs->mu_);
 
-  Node node;
-  const int rc = fs->resolve_locked(path, &node);
-  if (rc != 0) return rc;
+    Node node;
+    const int rc = fs->resolve_locked(path, &node);
+    if (rc != 0) return rc;
 
-  switch (node.type) {
-    case Node::Type::RootDir:
-    case Node::Type::EntryDir:
-    case Node::Type::GroupDir:
-      fs->fill_dir_stat(st, fs->mount_time_);  // mount-time stamps (§3.2)
-      break;
-    case Node::Type::TreeDir:
-    case Node::Type::SubmoduleDir:
-      fs->fill_dir_stat(st, node.commit_time);
-      break;
-    case Node::Type::BlobFile: {
-      // Header-only size: no full decompression for ordinary blobs and no
-      // revwalk here (RFC 0000 §3.2/§3.3).
-      std::uint64_t size = 0;
-      const int rc2 = fs->repo_->blob_size(node.blob_oid, &size);
-      if (rc2 != 0) return -rc2;
-      fs->fill_file_stat(st, node.commit_time, size, S_IFREG | (node.executable ? 0755u : 0644u));
-      break;
+    switch (node.type) {
+      case Node::Type::RootDir:
+      case Node::Type::EntryDir:
+      case Node::Type::GroupDir:
+        fs->fill_dir_stat(st, fs->mount_time_);  // mount-time stamps (§3.2)
+        break;
+      case Node::Type::TreeDir:
+      case Node::Type::SubmoduleDir:
+        fs->fill_dir_stat(st, node.commit_time);
+        break;
+      case Node::Type::BlobFile: {
+        // Header-only size: no full decompression for ordinary blobs and no
+        // revwalk here (RFC 0000 §3.2/§3.3).
+        std::uint64_t size = 0;
+        const int rc2 = fs->repo_->blob_size(node.blob_oid, &size);
+        if (rc2 != 0) return -rc2;
+        fs->fill_file_stat(st, node.commit_time, size, S_IFREG | (node.executable ? 0755u : 0644u));
+        break;
+      }
+      case Node::Type::Symlink: {
+        // Explicit exception (§3.2): st_size is the truncation-semantics
+        // length — the first NUL locates the truncation point.
+        BlobView view;
+        const int rc2 = fs->load_blob_locked(node.blob_oid, &view);
+        if (rc2 != 0) return -rc2;
+        const void* nulp = std::memchr(view.data(), '\0', view.size());
+        const std::uint64_t len =
+            nulp ? static_cast<std::uint64_t>(static_cast<const char*>(nulp) - view.data())
+                 : view.size();
+        fs->fill_file_stat(st, node.commit_time, len, S_IFLNK | 0777);
+        break;
+      }
+      case Node::Type::SubmoduleMarker: {
+        const std::string content = fs->submodule_marker_content_locked(
+            node.commit_root_tree, node.marker_path, node.gitlink_oid);
+        fs->fill_file_stat(st, node.commit_time, content.size(), S_IFREG | 0644);
+        break;
+      }
+      case Node::Type::CommitsFile: {
+        // Pure cache read: never triggers revwalk or fingerprint recompute;
+        // st_size = 0 before first generation (RFC 0000 §3.3/§3.5).
+        const std::uint64_t size = fs->commits_buffer_ ? fs->commits_buffer_->size() : 0;
+        const std::int64_t mtime =
+            fs->commits_buffer_ ? fs->commits_generated_at_ : fs->mount_time_;
+        fs->fill_file_stat(st, mtime, size, S_IFREG | 0444);
+        break;
+      }
+      case Node::Type::JsonFile:
+        fs->fill_file_stat(st, fs->mount_time_, fs->json_content_.size(), S_IFREG | 0444);
+        break;
     }
-    case Node::Type::Symlink: {
-      // Explicit exception (§3.2): st_size is the truncation-semantics
-      // length — the first NUL locates the truncation point.
-      BlobView view;
-      const int rc2 = fs->load_blob_locked(node.blob_oid, &view);
-      if (rc2 != 0) return -rc2;
-      const void* nulp = std::memchr(view.data(), '\0', view.size());
-      const std::uint64_t len =
-          nulp ? static_cast<std::uint64_t>(static_cast<const char*>(nulp) - view.data())
-               : view.size();
-      fs->fill_file_stat(st, node.commit_time, len, S_IFLNK | 0777);
-      break;
-    }
-    case Node::Type::SubmoduleMarker: {
-      const std::string content = fs->submodule_marker_content_locked(
-          node.commit_root_tree, node.marker_path, node.gitlink_oid);
-      fs->fill_file_stat(st, node.commit_time, content.size(), S_IFREG | 0644);
-      break;
-    }
-    case Node::Type::CommitsFile: {
-      // Pure cache read: never triggers revwalk or fingerprint recompute;
-      // st_size = 0 before first generation (RFC 0000 §3.3/§3.5).
-      const std::uint64_t size = fs->commits_buffer_ ? fs->commits_buffer_->size() : 0;
-      const std::int64_t mtime = fs->commits_buffer_ ? fs->commits_generated_at_ : fs->mount_time_;
-      fs->fill_file_stat(st, mtime, size, S_IFREG | 0444);
-      break;
-    }
-    case Node::Type::JsonFile:
-      fs->fill_file_stat(st, fs->mount_time_, fs->json_content_.size(), S_IFREG | 0444);
-      break;
+
+    st->st_ino = fs->inos_.register_path(path);
+    return 0;
+  } catch (const std::bad_alloc&) {
+    return -ENOMEM;
+  } catch (...) {
+    return -EIO;
   }
-
-  st->st_ino = fs->inos_.register_path(path);
-  return 0;
 }
 
 int Gitmount::cb_readlink(const char* path_c, char* buf, std::size_t size) {
-  Gitmount* fs = self();
-  std::lock_guard<std::mutex> lk(fs->mu_);
+  try {
+    Gitmount* fs = self();
+    std::lock_guard<std::mutex> lk(fs->mu_);
 
-  Node node;
-  const int rc = fs->resolve_locked(path_c, &node);
-  if (rc != 0) return rc;
-  if (node.type != Node::Type::Symlink) return -EINVAL;
+    Node node;
+    const int rc = fs->resolve_locked(path_c, &node);
+    if (rc != 0) return rc;
+    if (node.type != Node::Type::Symlink) return -EINVAL;
 
-  BlobView view;
-  const int rc2 = fs->load_blob_locked(node.blob_oid, &view);
-  if (rc2 != 0) return -rc2;
+    BlobView view;
+    const int rc2 = fs->load_blob_locked(node.blob_oid, &view);
+    if (rc2 != 0) return -rc2;
 
-  // Truncate at the first NUL (kernel targets cannot contain NUL); an empty
-  // blob is an empty target; truncation length >= PATH_MAX is ENAMETOOLONG
-  // (boundary pinned to >= in RFC 0000 §3.3).
-  const char* data = view.data();
-  std::size_t len = view.size();
-  const void* nulp = std::memchr(data, '\0', view.size());
-  if (nulp) len = static_cast<std::size_t>(static_cast<const char*>(nulp) - data);
-  if (len >= PATH_MAX) return -ENAMETOOLONG;
-  if (size == 0) return -EINVAL;
-  const std::size_t copy = std::min(len, size - 1);
-  std::memcpy(buf, data, copy);
-  buf[copy] = '\0';
-  return 0;
+    // Truncate at the first NUL (kernel targets cannot contain NUL); an empty
+    // blob is an empty target; truncation length >= PATH_MAX is ENAMETOOLONG
+    // (boundary pinned to >= in RFC 0000 §3.3).
+    const char* data = view.data();
+    std::size_t len = view.size();
+    const void* nulp = std::memchr(data, '\0', view.size());
+    if (nulp) len = static_cast<std::size_t>(static_cast<const char*>(nulp) - data);
+    if (len >= PATH_MAX) return -ENAMETOOLONG;
+    if (size == 0) return -EINVAL;
+    const std::size_t copy = std::min(len, size - 1);
+    std::memcpy(buf, data, copy);
+    buf[copy] = '\0';
+    return 0;
+  } catch (const std::bad_alloc&) {
+    return -ENOMEM;
+  } catch (...) {
+    return -EIO;
+  }
 }
 
 int Gitmount::cb_opendir(const char* path_c, struct fuse_file_info* fi) {
-  Gitmount* fs = self();
-  const std::string path(path_c);
-  std::lock_guard<std::mutex> lk(fs->mu_);
+  try {
+    Gitmount* fs = self();
+    const std::string path(path_c);
+    std::lock_guard<std::mutex> lk(fs->mu_);
 
-  Node node;
-  const int rc = fs->resolve_locked(path, &node);
-  if (rc != 0) return rc;
+    Node node;
+    const int rc = fs->resolve_locked(path, &node);
+    if (rc != 0) return rc;
 
-  std::vector<DirEntry> entries;
-  if (fs->list_dir_locked(path, node, &entries) != 0) return -ENOTDIR;
+    std::vector<DirEntry> entries;
+    if (fs->list_dir_locked(path, node, &entries) != 0) return -ENOTDIR;
 
-  // Register inodes for every listed entry (lazy registration on readdir,
-  // RFC 0000 §3.2) and pin the snapshot on fi->fh for stable offsets within
-  // this directory stream (§3.3).
-  std::string parent = path == "/" ? "" : path;
-  for (auto& e : entries) {
-    const std::string child = parent + "/" + e.name;
-    e.ino = fs->inos_.register_path(child);
+    // Register inodes for every listed entry (lazy registration on readdir,
+    // RFC 0000 §3.2) and pin the snapshot on fi->fh for stable offsets within
+    // this directory stream (§3.3).
+    std::string parent = path == "/" ? "" : path;
+    for (auto& e : entries) {
+      const std::string child = parent + "/" + e.name;
+      e.ino = fs->inos_.register_path(child);
+    }
+
+    fi->fh = reinterpret_cast<std::uint64_t>(new DirList{std::move(entries)});
+    return 0;
+  } catch (const std::bad_alloc&) {
+    return -ENOMEM;
+  } catch (...) {
+    return -EIO;
   }
-
-  fi->fh = reinterpret_cast<std::uint64_t>(new DirList{std::move(entries)});
-  return 0;
 }
 
 int Gitmount::cb_readdir(const char*, void* buf, fuse_fill_dir_t filler, off_t offset,
@@ -1150,131 +1191,141 @@ int Gitmount::cb_releasedir(const char*, struct fuse_file_info* fi) {
 }
 
 int Gitmount::cb_open(const char* path_c, struct fuse_file_info* fi) {
-  Gitmount* fs = self();
-  const std::string path(path_c);
+  try {
+    Gitmount* fs = self();
+    const std::string path(path_c);
 
-  // Only O_RDONLY opens are valid; write flags get EROFS (RFC 0000 §3.3).
-  if ((fi->flags & O_ACCMODE) != O_RDONLY) return -EROFS;
+    // Only O_RDONLY opens are valid; write flags get EROFS (RFC 0000 §3.3).
+    if ((fi->flags & O_ACCMODE) != O_RDONLY) return -EROFS;
 
-  std::lock_guard<std::mutex> lk(fs->mu_);
-  Node node;
-  const int rc = fs->resolve_locked(path, &node);
-  if (rc != 0) return rc;
+    std::lock_guard<std::mutex> lk(fs->mu_);
+    Node node;
+    const int rc = fs->resolve_locked(path, &node);
+    if (rc != 0) return rc;
 
-  auto* handle = new Handle();
-  switch (node.type) {
-    case Node::Type::BlobFile: {
-      // Oversized admission via header-only size (boundary is >=, §3.5):
-      // decompress once OUTSIDE the lock and pin on this handle — every
-      // read of this open slices the pinned block (§3.3/§3.5).
-      std::uint64_t size = 0;
-      const int rc2 = fs->repo_->blob_size(node.blob_oid, &size);
-      if (rc2 != 0) {
-        delete handle;
-        return -rc2;
-      }
-      if (size >= fs->blob_cache_.capacity()) {
-        fs->mu_.unlock();
-        std::string data;
-        const int rc3 = fs->decompress_blob_unlocked(node.blob_oid, &data);
-        fs->mu_.lock();
-        if (rc3 != 0) {
-          delete handle;
-          return -rc3;
+    // unique_ptr so the handle is freed on the exception paths too.
+    auto handle = std::make_unique<Handle>();
+    switch (node.type) {
+      case Node::Type::BlobFile: {
+        // Oversized admission via header-only size (boundary is >=, §3.5):
+        // decompress once OUTSIDE the lock and pin on this handle — every
+        // read of this open slices the pinned block (§3.3/§3.5).
+        std::uint64_t size = 0;
+        const int rc2 = fs->repo_->blob_size(node.blob_oid, &size);
+        if (rc2 != 0) return -rc2;
+        if (size >= fs->blob_cache_.capacity()) {
+          // ScopedUnlock re-locks mu_ on every exit path, including the
+          // bad_alloc of the (unbounded) oversized decompression (issue #4).
+          std::string data;
+          int rc3 = 0;
+          {
+            ScopedUnlock unlock(fs->mu_);
+            rc3 = fs->decompress_blob_unlocked(node.blob_oid, &data);
+          }
+          if (rc3 != 0) return -rc3;
+          handle->kind = Handle::Kind::PinnedBlob;
+          handle->data = std::move(data);
+        } else {
+          handle->kind = Handle::Kind::Plain;
         }
-        handle->kind = Handle::Kind::PinnedBlob;
-        handle->data = std::move(data);
-      } else {
-        handle->kind = Handle::Kind::Plain;
+        break;
       }
-      break;
-    }
-    case Node::Type::Symlink:
-      handle->kind = Handle::Kind::Plain;  // readlink is the access path
-      break;
-    case Node::Type::CommitsFile: {
-      // First open triggers generation; the buffer version is pinned on
-      // this handle until release (RFC 0000 §3.3/§3.5). open_commits takes
-      // its own (outer) generation lock — mu_ is released while it runs.
-      fs->mu_.unlock();
-      std::shared_ptr<const std::string> buffer;
-      const int rc2 = fs->open_commits(&buffer);
-      fs->mu_.lock();
-      if (rc2 != 0) {
-        delete handle;
-        return rc2;
+      case Node::Type::Symlink:
+        handle->kind = Handle::Kind::Plain;  // readlink is the access path
+        break;
+      case Node::Type::CommitsFile: {
+        // First open triggers generation; the buffer version is pinned on
+        // this handle until release (RFC 0000 §3.3/§3.5). open_commits takes
+        // its own (outer) generation lock — mu_ is released while it runs.
+        std::shared_ptr<const std::string> buffer;
+        int rc2 = 0;
+        {
+          ScopedUnlock unlock(fs->mu_);
+          rc2 = fs->open_commits(&buffer);
+        }
+        if (rc2 != 0) return rc2;
+        handle->kind = Handle::Kind::PinnedCommits;
+        handle->shared = std::move(buffer);
+        break;
       }
-      handle->kind = Handle::Kind::PinnedCommits;
-      handle->shared = std::move(buffer);
-      break;
+      case Node::Type::JsonFile:
+        // Immutable for the mount: no pinning needed (§3.6).
+        handle->kind = Handle::Kind::Synthetic;
+        handle->shared = std::make_shared<const std::string>(fs->json_content_);
+        break;
+      case Node::Type::SubmoduleMarker:
+        handle->kind = Handle::Kind::Synthetic;
+        handle->shared = std::make_shared<const std::string>(fs->submodule_marker_content_locked(
+            node.commit_root_tree, node.marker_path, node.gitlink_oid));
+        break;
+      case Node::Type::RootDir:
+      case Node::Type::EntryDir:
+      case Node::Type::GroupDir:
+      case Node::Type::TreeDir:
+      case Node::Type::SubmoduleDir:
+        handle->kind = Handle::Kind::Dir;
+        break;
     }
-    case Node::Type::JsonFile:
-      // Immutable for the mount: no pinning needed (§3.6).
-      handle->kind = Handle::Kind::Synthetic;
-      handle->shared = std::make_shared<const std::string>(fs->json_content_);
-      break;
-    case Node::Type::SubmoduleMarker:
-      handle->kind = Handle::Kind::Synthetic;
-      handle->shared = std::make_shared<const std::string>(fs->submodule_marker_content_locked(
-          node.commit_root_tree, node.marker_path, node.gitlink_oid));
-      break;
-    case Node::Type::RootDir:
-    case Node::Type::EntryDir:
-    case Node::Type::GroupDir:
-    case Node::Type::TreeDir:
-    case Node::Type::SubmoduleDir:
-      handle->kind = Handle::Kind::Dir;
-      break;
+    fi->fh = reinterpret_cast<std::uint64_t>(handle.release());
+    return 0;
+  } catch (const std::bad_alloc&) {
+    return -ENOMEM;
+  } catch (...) {
+    return -EIO;
   }
-  fi->fh = reinterpret_cast<std::uint64_t>(handle);
-  return 0;
 }
 
 int Gitmount::cb_read(const char* path_c, char* buf, std::size_t size, off_t offset,
                       struct fuse_file_info* fi) {
-  Gitmount* fs = self();
-  auto* handle = reinterpret_cast<Handle*>(fi->fh);
-  if (!handle) return -EINVAL;
+  try {
+    Gitmount* fs = self();
+    auto* handle = reinterpret_cast<Handle*>(fi->fh);
+    if (!handle) return -EINVAL;
 
-  const char* data = nullptr;
-  std::size_t len = 0;
-  BlobView view;  // keeps a cache hit alive while copying
+    const char* data = nullptr;
+    std::size_t len = 0;
+    BlobView view;  // keeps a cache hit alive while copying
 
-  switch (handle->kind) {
-    case Handle::Kind::PinnedBlob:
-      data = handle->data.data();
-      len = handle->data.size();
-      break;
-    case Handle::Kind::PinnedCommits:
-    case Handle::Kind::Synthetic:
-      data = handle->shared->data();
-      len = handle->shared->size();
-      break;
-    case Handle::Kind::Plain: {
-      // Re-resolve per read; cacheable blobs go through the LRU (§3.5).
-      std::lock_guard<std::mutex> lk(fs->mu_);
-      Node node;
-      const int rc = fs->resolve_locked(path_c, &node);
-      if (rc != 0) return rc;
-      if (node.type == Node::Type::Symlink) return -EINVAL;
-      if (node.type != Node::Type::BlobFile) return -EISDIR;
-      const int rc2 = fs->load_blob_locked(node.blob_oid, &view);
-      if (rc2 != 0) return -rc2;
-      data = view.data();
-      len = view.size();
-      break;
+    switch (handle->kind) {
+      case Handle::Kind::PinnedBlob:
+        data = handle->data.data();
+        len = handle->data.size();
+        break;
+      case Handle::Kind::PinnedCommits:
+      case Handle::Kind::Synthetic:
+        data = handle->shared->data();
+        len = handle->shared->size();
+        break;
+      case Handle::Kind::Plain: {
+        // Re-resolve per read; cacheable blobs go through the LRU (§3.5).
+        std::lock_guard<std::mutex> lk(fs->mu_);
+        Node node;
+        const int rc = fs->resolve_locked(path_c, &node);
+        if (rc != 0) return rc;
+        if (node.type == Node::Type::Symlink) return -EINVAL;
+        if (node.type != Node::Type::BlobFile) return -EISDIR;
+        const int rc2 = fs->load_blob_locked(node.blob_oid, &view);
+        if (rc2 != 0) return -rc2;
+        data = view.data();
+        len = view.size();
+        break;
+      }
+      case Handle::Kind::Dir:
+        return -EISDIR;
     }
-    case Handle::Kind::Dir:
-      return -EISDIR;
-  }
 
-  // Slice [offset, offset+size) with bounds clipping (RFC 0000 §3.3).
-  if (offset < 0) return -EINVAL;
-  const std::uint64_t off = static_cast<std::uint64_t>(offset);
-  if (off >= len) return 0;
-  const std::size_t copy = static_cast<std::size_t>(std::min<std::uint64_t>(size, len - off));
-  std::memcpy(buf, data + off, copy);
-  return static_cast<int>(copy);
+    // Slice [offset, offset+size) with bounds clipping (RFC 0000 §3.3).
+    if (offset < 0) return -EINVAL;
+    const std::uint64_t off = static_cast<std::uint64_t>(offset);
+    if (off >= len) return 0;
+    const std::size_t copy = static_cast<std::size_t>(std::min<std::uint64_t>(size, len - off));
+    std::memcpy(buf, data + off, copy);
+    return static_cast<int>(copy);
+  } catch (const std::bad_alloc&) {
+    return -ENOMEM;
+  } catch (...) {
+    return -EIO;
+  }
 }
 
 int Gitmount::cb_release(const char*, struct fuse_file_info* fi) {
@@ -1284,18 +1335,24 @@ int Gitmount::cb_release(const char*, struct fuse_file_info* fi) {
 }
 
 int Gitmount::cb_statfs(const char*, struct statvfs* st) {
-  Gitmount* fs = self();
-  std::lock_guard<std::mutex> lk(fs->mu_);
-  const std::uint64_t bytes = fs->repo_->odb_disk_bytes();
-  std::memset(st, 0, sizeof(*st));
-  st->f_bsize = 4096;
-  st->f_frsize = 4096;
-  st->f_blocks = (bytes + 4095) / 4096;  // local ODB usage only (§3.3)
-  st->f_bfree = 0;                       // read-only volume convention: df shows 100% used
-  st->f_bavail = 0;
-  st->f_files = 0;  // exact inode counting would need a full walk (§3.3)
-  st->f_ffree = 0;
-  return 0;
+  try {
+    Gitmount* fs = self();
+    std::lock_guard<std::mutex> lk(fs->mu_);
+    const std::uint64_t bytes = fs->repo_->odb_disk_bytes();
+    std::memset(st, 0, sizeof(*st));
+    st->f_bsize = 4096;
+    st->f_frsize = 4096;
+    st->f_blocks = (bytes + 4095) / 4096;  // local ODB usage only (§3.3)
+    st->f_bfree = 0;                       // read-only volume convention: df shows 100% used
+    st->f_bavail = 0;
+    st->f_files = 0;  // exact inode counting would need a full walk (§3.3)
+    st->f_ffree = 0;
+    return 0;
+  } catch (const std::bad_alloc&) {
+    return -ENOMEM;
+  } catch (...) {
+    return -EIO;
+  }
 }
 
 int Gitmount::cb_erofs() { return -EROFS; }
