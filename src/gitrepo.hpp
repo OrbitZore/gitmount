@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-#include <git2.h>
+#include "git_compat.hpp"
 
 namespace gitmount {
 

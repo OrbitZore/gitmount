@@ -7,7 +7,7 @@
 
 #include "errmap.hpp"
 
-#include <git2.h>
+#include "git_compat.hpp"
 
 using gitmount::git_to_errno;
 

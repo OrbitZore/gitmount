@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Building against a libgit2 compiled with `GIT_EXPERIMENTAL_SHA256` is
+  now rejected at compile time with an actionable `#error` message via
+  the new `src/git_compat.hpp` (the single include point for git2
+  headers, probing `GIT_OID_SHA256_HEXSIZE`): the experimental build's
+  3-argument `git_oid_fromstr` and larger `git_oid` ABI are unsupported
+  in v0.1, and the previous failure was a bare "too few arguments" at
+  two call sites with no guidance.
+- The system libgit2 minimum is now 1.7 (was 1.4, a declaration that did
+  not match reality): `git_repository_oid_type` and the `git_oid_t` enum
+  first appeared in libgit2 v1.7.0, so 1.4–1.6 system libraries failed
+  to compile. The vendored path pins v1.9.7 and is unaffected.
+- RFC 0000 §1.3 (non-goals) now records SHA-256 object-format
+  repositories as out of scope for v0.1 — they require an experimental
+  libgit2 build, which the compile-time guard rejects until properly
+  supported.
+
 ## [0.0.4] - 2026-09-26
 
 ### Fixed

@@ -18,7 +18,7 @@
 #include <string_view>
 #include <vector>
 
-#include <git2.h>
+#include "git_compat.hpp"
 
 namespace gitmount::rawobj {
 

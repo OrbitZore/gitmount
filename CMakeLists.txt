@@ -25,14 +25,17 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(FUSE3 REQUIRED IMPORTED_TARGET fuse3>=3.10)
 find_package(Threads REQUIRED)
 
-# System libgit2 (>= 1.4) by default; a pinned vendored copy (v1.9.7,
+# System libgit2 (>= 1.7) by default; a pinned vendored copy (v1.9.7,
 # static, network backends disabled) is used when the system version is
 # too old — e.g. Ubuntu 22.04 ships libgit2 1.1. The vendored path also
 # produces release binaries with one less runtime dependency.
 option(GITMOUNT_USE_SYSTEM_LIBGIT2 "Link the system libgit2 (pkg-config); OFF builds a pinned vendored copy" ON)
 
 if(GITMOUNT_USE_SYSTEM_LIBGIT2)
-  pkg_check_modules(LIBGIT2 REQUIRED IMPORTED_TARGET libgit2>=1.4)
+  # git_repository_oid_type (gitrepo.cpp) and the git_oid_t enum (rawobj)
+  # first appeared in libgit2 v1.7.0 — older system libraries fail to
+  # compile. The vendored path pins v1.9.7 and is unaffected.
+  pkg_check_modules(LIBGIT2 REQUIRED IMPORTED_TARGET libgit2>=1.7)
   set(GITMOUNT_LIBGIT2_TARGET PkgConfig::LIBGIT2)
 else()
   include(FetchContent)
