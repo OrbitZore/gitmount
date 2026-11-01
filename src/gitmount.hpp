@@ -13,7 +13,6 @@
 //   * segmented LRU load (lookup in lock, decompress outside, re-check in)
 #pragma once
 
-#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -25,6 +24,7 @@
 
 #include "gitrepo.hpp"
 #include "ino_registry.hpp"
+#include "lock_guards.hpp"
 #include "object_cache.hpp"
 #include "path_map.hpp"
 
@@ -190,11 +190,9 @@ class Gitmount {
   MetaLruCache meta_cache_;  // Tier-2: raw trees + commit facts (§3.5)
   InoRegistry inos_;
 
-  // /commits single-flight state (RFC 0000 §3.4/§3.5).
-  std::mutex commits_gen_mu_;  // outer lock; never held with mu_ inner-reversed
-  std::condition_variable commits_cv_;
-  bool commits_generating_ = false;  // guarded by commits_gen_mu_
-  std::uint64_t commits_epoch_ = 0;  // guarded by commits_gen_mu_
+  // /commits single-flight state machine (RFC 0000 §3.4/§3.5). Its internal
+  // mutex is the outermost lock; never held with mu_ inner-reversed.
+  SingleFlight commits_flight_;
   // guarded by mu_:
   std::shared_ptr<const std::string> commits_buffer_;
   std::string commits_fingerprint_;

@@ -5,6 +5,30 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Exception safety of the segmented-loading unlock windows (issue #4; RFC
+  0000 §3.4 concurrency model): an allocation failure inside one of the five
+  manual `mu_.unlock() … mu_.lock()` windows (tree/commit-facts/blob loads,
+  oversized-blob open-pin, `/commits` open) previously made the surrounding
+  `std::lock_guard` unlock an already-unlocked mutex (UB) and the exception
+  escape through libfuse's C frames into `std::terminate`. All five windows
+  now use a `ScopedUnlock` RAII guard (`src/lock_guards.hpp`) that re-locks
+  on every exit path, exception unwinding included.
+- An exception in `/commits` generation no longer wedges the single-flight
+  state forever: the state machine is now a `SingleFlight` guard whose
+  `GeneratorFinish` resets the in-flight flag, advances the wake-up epoch and
+  notifies riders on every exit path (re-locking through the same
+  `unique_lock`); generation failures — `bad_alloc` included — map to EIO
+  with retry-on-next-open (§3.5) instead of parking every later open on the
+  condition variable until the libfuse worker pool (default 10) is exhausted
+  and the whole filesystem stalls.
+- FUSE callback boundaries (`getattr`, `readlink`, `opendir`, `open`,
+  `read`, `statfs`) now translate escaped exceptions into `-ENOMEM`
+  (`std::bad_alloc`) / `-EIO` (anything else) — no exception can cross into
+  libfuse's C frames and abort the mount.
+
 ## [0.0.4] - 2026-09-26
 
 ### Fixed
