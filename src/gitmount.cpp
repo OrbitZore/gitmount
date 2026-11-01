@@ -473,9 +473,12 @@ int Gitmount::resolve_locked(const std::string& path, Node* out) {
         case Ns::Remote:
           return resolve_remote_locked(p.comps, out);
         case Ns::Commit: {
-          // Full lowercase oid only, pointing at a commit object itself —
-          // no peeling, replace refs never honored (RFC 0000 §3.1).
-          if (!pathmap::is_full_oid(p.comps[0])) return -ENOENT;
+          // Full lowercase oid only, matching the repository's object format
+          // (RFC 0000 §3.1): a 64-hex string on a SHA-1 repository is not a
+          // full oid — libgit2's git_oid_fromstr would silently parse only the
+          // first 40 chars (prefix alias).
+          const std::size_t hexsz = repo_->oid_type() == GIT_OID_SHA1 ? 40 : 64;
+          if (p.comps[0].size() != hexsz || !pathmap::is_full_oid(p.comps[0])) return -ENOENT;
           git_oid oid{};
           if (git_oid_fromstr(&oid, p.comps[0].c_str()) != 0) return -ENOENT;
           if (!repo_->is_commit_object(oid)) return -ENOENT;

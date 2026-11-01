@@ -201,6 +201,15 @@ zz" "$(ls -1 "$MNT/tag/foo")"
   check "/commit rejects uppercase oid" \
     test ! -e "$MNT/commit/$(echo "$MAIN_TIP" | tr a-z A-Z)"
   check "/commit rejects short prefix" test ! -e "$MNT/commit/${MAIN_TIP:0:8}"
+  # 64-hex is not a full oid on this SHA-1 fixture: before the length check
+  # git_oid_fromstr silently parsed the first 40 chars (prefix alias, #6).
+  OVERLONG_OID="${MAIN_TIP}000000000000000000000000"  # 40 + 24 = 64 hex
+  check "/commit 40-hex commit dir lists (SHA-1 full oid)" \
+    ls "$MNT/commit/$MAIN_TIP/src"
+  check "/commit rejects 64-hex oid (SHA-1 prefix alias)" \
+    test ! -e "$MNT/commit/$OVERLONG_OID"
+  check "/commit rejects 64-hex deep path" \
+    test ! -e "$MNT/commit/$OVERLONG_OID/src/hello.txt"
 
   # --- refs/replace not honored (§3.1) ---
   check_eq "replace refs ignored (original R1 content)" "original R1" \
