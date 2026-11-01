@@ -4,7 +4,7 @@
 #include "rawobj.hpp"
 
 #include <algorithm>
-#include <cerrno>
+#include <charconv>
 #include <cstring>
 
 namespace gitmount::rawobj {
@@ -159,8 +159,15 @@ std::optional<CommitFacts> parse_commit(const char* data, std::size_t len, git_o
         // strip a trailing tz if it glued on (shouldn't: tz is separated)
         std::size_t sp = ts.find(' ');
         if (sp != std::string_view::npos) ts = ts.substr(0, sp);
-        if (!ts.empty() && ts.find_first_not_of("0123456789-") == std::string_view::npos) {
-          out.committer_time = std::strtoll(std::string(ts).c_str(), nullptr, 10);
+        // Strict decimal parse: optional '-', digits only, full consumption,
+        // overflow rejected (from_chars yields result_out_of_range). Matches
+        // libgit2's git__strntol64, which fails the whole commit object on an
+        // overflowing or malformed committer timestamp; negative (pre-epoch)
+        // timestamps stay accepted, as in libgit2.
+        std::int64_t t = 0;
+        const auto [pend, ec] = std::from_chars(ts.data(), ts.data() + ts.size(), t);
+        if (!ts.empty() && ec == std::errc{} && pend == ts.data() + ts.size()) {
+          out.committer_time = t;
           have_committer = true;
         }
       }
