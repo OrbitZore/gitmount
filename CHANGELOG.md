@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- `/commit/<oid>` no longer silently truncates a 64-hex component to its
+  40-char prefix on SHA-1 repositories. The component length is now
+  validated against the repository's object format per RFC 0000 §3.1
+  (a full oid is exactly 40 hex on SHA-1, 64 on SHA-256); a
+  wrong-length string returns ENOENT instead of resolving to whatever
+  commit its 40-char prefix names. Note: SHA-256 repositories remain
+  unmountable altogether — libgit2 rejects them at open time with
+  `unknown object format` — so on current builds the 64-hex form could
+  only ever manifest as this prefix alias.
+
 ## [0.0.4] - 2026-09-26
 
 ### Fixed
