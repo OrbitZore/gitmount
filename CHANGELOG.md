@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- A serialized tree object larger than 4 GiB made `index_tree` silently
+  wrap its uint32 entry offsets past the 4 GiB mark back into the first
+  4 GiB (security review 2026-11, finding ②): readdir listings were
+  silently truncated or showed duplicated/wrong entries past the wrap
+  point, and `tree_find` could resolve a lookup to the wrong entry —
+  deterministically constructible by an attacker-authored object store.
+  No out-of-bounds access was possible (`entry_at` bounds-checks every
+  step); real git cannot produce such a tree (a single directory would
+  need 100M+ entries), so this only hardens against hand-crafted loose
+  or non-delta pack objects. Such trees are now rejected as malformed
+  up front (EIO, with a warning naming the object), and `tree_locked`
+  now actually logs the warning for every malformed tree that the
+  source comments had promised.
+
 ## [0.0.4] - 2026-09-26
 
 ### Fixed
