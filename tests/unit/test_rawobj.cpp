@@ -203,6 +203,64 @@ TEST_CASE("parse_commit rejects missing headers", "[rawobj]") {
   CHECK_FALSE(parse_commit(no_committer, std::strlen(no_committer), GIT_OID_SHA1).has_value());
 }
 
+TEST_CASE("parse_commit rejects overflowing and residual timestamps", "[rawobj]") {
+  // libgit2's git__strntol64 fails the whole commit object on these; the
+  // old strtoll path saturated to ±LLONG_MAX or silently dropped residue
+  // into stat mtimes (issue #7).
+  const char* overflow_pos =
+      "tree 0123456789abcdef0123456789abcdef01234567\n"
+      "committer X <x@y> 99999999999999999999999 +0000\n"
+      "\n"
+      "m\n";
+  CHECK_FALSE(parse_commit(overflow_pos, std::strlen(overflow_pos), GIT_OID_SHA1).has_value());
+  const char* overflow_neg =
+      "tree 0123456789abcdef0123456789abcdef01234567\n"
+      "committer X <x@y> -99999999999999999999 +0000\n"
+      "\n"
+      "m\n";
+  CHECK_FALSE(parse_commit(overflow_neg, std::strlen(overflow_neg), GIT_OID_SHA1).has_value());
+
+  // 19-digit boundary: INT64_MAX parses, INT64_MAX + 1 overflows.
+  const char* int64_max =
+      "tree 0123456789abcdef0123456789abcdef01234567\n"
+      "committer X <x@y> 9223372036854775807 +0000\n"
+      "\n"
+      "m\n";
+  auto fmax = parse_commit(int64_max, std::strlen(int64_max), GIT_OID_SHA1);
+  REQUIRE(fmax.has_value());
+  CHECK(fmax->committer_time == 9223372036854775807LL);
+  const char* int64_over =
+      "tree 0123456789abcdef0123456789abcdef01234567\n"
+      "committer X <x@y> 9223372036854775808 +0000\n"
+      "\n"
+      "m\n";
+  CHECK_FALSE(parse_commit(int64_over, std::strlen(int64_over), GIT_OID_SHA1).has_value());
+
+  // Residue the whitelist let through and strtoll parsed partially or to
+  // 0: "12-34" → 12, "1700000000-" → 1700000000, "-" / "--1" → 0.
+  const char* residual[] = {"12-34", "1700000000-", "-", "--1"};
+  for (const char* ts : residual) {
+    std::string body = "tree 0123456789abcdef0123456789abcdef01234567\ncommitter X <x@y> ";
+    body += ts;
+    body += " +0000\n\nm\n";
+    INFO(ts);
+    CHECK_FALSE(parse_commit(body.data(), body.size(), GIT_OID_SHA1).has_value());
+  }
+}
+
+TEST_CASE("parse_commit keeps negative pre-epoch timestamps", "[rawobj]") {
+  // libgit2 accepts negative committer times (pre-epoch commits exist);
+  // strict parsing must not regress them.
+  const char* body =
+      "tree 0123456789abcdef0123456789abcdef01234567\n"
+      "committer X <x@y> -14182940 +0000\n"
+      "\n"
+      "m\n";
+  auto f = parse_commit(body, std::strlen(body), GIT_OID_SHA1);
+  REQUIRE(f.has_value());
+  CHECK(f->committer_time == -14182940);
+}
+
 TEST_CASE("parse_tag extracts the target oid", "[rawobj]") {
   const char* body =
       "object 0123456789abcdef0123456789abcdef01234567\n"

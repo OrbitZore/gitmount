@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- `parse_commit` now parses the committer timestamp with strict
+  full-consumption `std::from_chars`: overflowing timestamps (saturating
+  to ±LLONG_MAX) and residual or malformed ones (`12-34`,
+  `1700000000-`, `-`, `--1`) fail the whole commit object (→ EIO)
+  instead of leaking into `stat(2)` mtimes. This aligns rawobj with
+  libgit2's `git__strntol64`, which already failed these commits during
+  `/commits` generation — one repository object no longer has two
+  semantics. Negative (pre-epoch) timestamps remain accepted, as in
+  libgit2. Also removes the per-commit `std::string` temporary on the
+  hot metadata path (issue #7).
+
 ## [0.0.4] - 2026-09-26
 
 ### Fixed
