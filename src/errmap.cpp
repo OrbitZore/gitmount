@@ -5,7 +5,7 @@
 
 #include <cerrno>
 
-#include <git2.h>
+#include "git_compat.hpp"
 
 namespace gitmount {
 

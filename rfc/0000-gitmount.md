@@ -101,6 +101,8 @@ commit 解析为一个 commit 对象，
 - 稀疏检出、部分克隆（partial clone）。
 - macOS（osxfuse/macFUSE）与 BSD 移植（接口层预留抽象）。
 - 工作区（index）视图、stash 视图。
+- SHA-256 对象格式仓库（v0.1；需 libgit2 实验构建，编译期守卫先行
+  拒绝）。
 
 ## 2. 术语与要求用语
 
